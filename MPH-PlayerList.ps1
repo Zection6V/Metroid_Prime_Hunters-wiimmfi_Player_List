@@ -238,7 +238,10 @@ $form.Size = New-Object System.Drawing.Size(660, 500)
 $form.StartPosition = 'CenterScreen'
 $form.BackColor = $bgDark
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-$icoPath = Join-Path $ImgDir 'wifi.png'
+try {
+    $wifi = Join-Path $ImgDir 'wifi.png'
+    if (Test-Path $wifi) { $form.Icon = [System.Drawing.Icon]::FromHandle((New-Object System.Drawing.Bitmap($wifi)).GetHicon()) }
+} catch {}
 
 $lblTitle = New-Object System.Windows.Forms.Label
 $lblTitle.Text = "Player List"
@@ -298,16 +301,24 @@ $picMode2.SizeMode = 'Zoom'
 $picMode2.BackColor = [System.Drawing.Color]::Transparent
 $form.Controls.Add($picMode2)
 
-# Friends / Rivals
+# Friends / Rivals （アイコン + ラベル）
+$picFriends = New-Object System.Windows.Forms.PictureBox
+$picFriends.Location = New-Object System.Drawing.Point(250, 286); $picFriends.Size = New-Object System.Drawing.Size(24, 24)
+$picFriends.SizeMode = 'Zoom'; $picFriends.BackColor = [System.Drawing.Color]::Transparent
+$picFriends.Visible = $false; $form.Controls.Add($picFriends)
 $lblFriends = New-Object System.Windows.Forms.Label
 $lblFriends.Text = "Friends"; $lblFriends.ForeColor = [System.Drawing.Color]::FromArgb(0x5E,0x5E,0xFF)
 $lblFriends.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-$lblFriends.Location = New-Object System.Drawing.Point(250, 288); $lblFriends.AutoSize = $true
+$lblFriends.Location = New-Object System.Drawing.Point(282, 288); $lblFriends.AutoSize = $true
 $lblFriends.Visible = $false; $form.Controls.Add($lblFriends)
+$picRivals = New-Object System.Windows.Forms.PictureBox
+$picRivals.Location = New-Object System.Drawing.Point(250, 318); $picRivals.Size = New-Object System.Drawing.Size(24, 24)
+$picRivals.SizeMode = 'Zoom'; $picRivals.BackColor = [System.Drawing.Color]::Transparent
+$picRivals.Visible = $false; $form.Controls.Add($picRivals)
 $lblRivals = New-Object System.Windows.Forms.Label
 $lblRivals.Text = "Rivals"; $lblRivals.ForeColor = [System.Drawing.Color]::FromArgb(0xFF,0x62,0x62)
 $lblRivals.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-$lblRivals.Location = New-Object System.Drawing.Point(250, 320); $lblRivals.AutoSize = $true
+$lblRivals.Location = New-Object System.Drawing.Point(282, 320); $lblRivals.AutoSize = $true
 $lblRivals.Visible = $false; $form.Controls.Add($lblRivals)
 
 # ステータスバー
@@ -347,7 +358,11 @@ function Update-Detail {
     $detail.Num.Text    = $d.NumPlayers
     $picMode1.Image = Load-Img $d.Mode1
     $picMode2.Image = Load-Img $d.Mode2
+    if ($d.ShowFriends -and -not $picFriends.Image) { $picFriends.Image = Load-Img 'friends.png' }
+    if ($d.ShowRivals  -and -not $picRivals.Image)  { $picRivals.Image  = Load-Img 'rivals.png' }
+    $picFriends.Visible = $d.ShowFriends
     $lblFriends.Visible = $d.ShowFriends
+    $picRivals.Visible  = $d.ShowRivals
     $lblRivals.Visible  = $d.ShowRivals
 }
 $list.Add_SelectedIndexChanged({ Update-Detail })
@@ -376,7 +391,8 @@ function Refresh-Data {
     } else {
         foreach ($k in $detail.Keys) { $detail[$k].Text = "" }
         $picMode1.Image = $null; $picMode2.Image = $null
-        $lblFriends.Visible = $false; $lblRivals.Visible = $false
+        $picFriends.Visible = $false; $lblFriends.Visible = $false
+        $picRivals.Visible = $false; $lblRivals.Visible = $false
     }
     $status.Text = ("Online: {0} players   /   Last updated {1}   /   source: wiimmfi.de (via {2})" -f $script:PlayersDecoded.Count, (Get-Date -Format 'HH:mm:ss'), (Split-Path $browser -Leaf))
 }
