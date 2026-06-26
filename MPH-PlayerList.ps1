@@ -368,70 +368,131 @@ function Update-Detail {
 $list.Add_SelectedIndexChanged({ Update-Detail })
 
 # ----------------------------------------------------------------------------
-# データ更新（16 秒ごと + 起動直後）
+# 描画のみ（取得はバックグラウンド runspace 側。UI スレッドを塞がない）
+#   $Html を解析・デコードし、変化があった部分だけ GUI を更新する。
 # ----------------------------------------------------------------------------
-function Refresh-Data {
-    $html = Get-StatsHtml -Port $Port
-    if (-not $html) {
-        $status.Text = "接続待ち... Cloudflare チャレンジ通過中、またはネットワーク確認中 (" + (Get-Date -Format 'HH:mm:ss') + ")"
-        return
-    }
-    $players = Parse-Players -Html $html   # カンマ返しのため @() は付けない
-    $script:PlayersDecoded = @()
-    foreach ($p in $players) { $script:PlayersDecoded += (Decode-Player $p) }
+$script:LastNames = [guid]::NewGuid().ToString()   # 初回は必ず再構築させる番兵
+$script:OnlineCount = 0
+function Render-Players {
+    param([string]$Html)
+    if (-not $Html) { return }
+    $players = Parse-Players -Html $Html   # カンマ返しのため @() は付けない
+    $decoded = @()
+    foreach ($p in $players) { $decoded += (Decode-Player $p) }
+    $script:PlayersDecoded = $decoded
+    $script:OnlineCount = $decoded.Count
 
-    $prev = $list.SelectedItem
-    $list.BeginUpdate()
-    $list.Items.Clear()
-    foreach ($d in $script:PlayersDecoded) { [void]$list.Items.Add($d.Name) }
-    $list.EndUpdate()
+    $names = @($decoded | ForEach-Object { $_.Name })
+    $joined = ($names -join "`n")
+    if ($joined -ne $script:LastNames) {           # 顔ぶれが変わった時だけ ListBox を作り直す
+        $script:LastNames = $joined
+        $prev = $list.SelectedItem
+        $list.BeginUpdate()
+        $list.Items.Clear()
+        foreach ($n in $names) { [void]$list.Items.Add($n) }
+        $list.EndUpdate()
+        if ($list.Items.Count -gt 0) {
+            $idx = if ($prev) { $list.Items.IndexOf($prev) } else { -1 }
+            $list.SelectedIndex = [Math]::Max(0, $idx)
+        }
+    }
     if ($list.Items.Count -gt 0) {
-        $idx = if ($prev) { $list.Items.IndexOf($prev) } else { -1 }
-        $list.SelectedIndex = [Math]::Max(0, $idx)
+        Update-Detail                              # 選択中プレイヤーの詳細を最新値で再描画
     } else {
         foreach ($k in $detail.Keys) { $detail[$k].Text = "" }
         $picMode1.Image = $null; $picMode2.Image = $null
         $picFriends.Visible = $false; $lblFriends.Visible = $false
         $picRivals.Visible = $false; $lblRivals.Visible = $false
     }
-    $status.Text = ("Online: {0} players   /   Last updated {1}   /   source: wiimmfi.de (via {2})" -f $script:PlayersDecoded.Count, (Get-Date -Format 'HH:mm:ss'), (Split-Path $browser -Leaf))
 }
 
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 16000
-$timer.Add_Tick({ Refresh-Data })
+# ----------------------------------------------------------------------------
+# バックグラウンド取得スレッド（別 runspace）
+#   ネットワーク(CDP)処理を UI スレッドから完全に分離する。結果は同期ハッシュ
+#   テーブル $sync 経由で受け渡し、UI 側は軽量タイマーで拾うだけ。
+# ----------------------------------------------------------------------------
+$sync = [hashtable]::Synchronized(@{
+        Port = $Port; Url = $Url; Html = $null; Seq = 0
+        Status = 'starting'; Err = ''; Stop = $false; LastOk = $null
+    })
 
-# 起動直後: Cloudflare 通過をポーリング（最大 ~45 秒）してから初回描画
-$form.Add_Shown({
-    $form.Refresh()
-    $deadline = (Get-Date).AddSeconds(45)
-    while ((Get-Date) -lt $deadline) {
-        [System.Windows.Forms.Application]::DoEvents()
-        $html = Get-StatsHtml -Port $Port
-        if ($html) { break }
-        Start-Sleep -Milliseconds 1500
-    }
-    Refresh-Data
-    $timer.Start()
-})
+# ワーカー本体（$sync は SessionStateProxy 経由で共有）。Invoke-CdpEval は
+# 既存定義を文字列注入して単一ソースを維持する。
+$workerBody = @'
+$ErrorActionPreference = 'Stop'
+while (-not $sync.Stop) {
+    try {
+        $tabs = Invoke-RestMethod ("http://127.0.0.1:{0}/json" -f $sync.Port) -TimeoutSec 10
+        $tab = $tabs | Where-Object { $_.type -eq 'page' -and $_.url -match 'wiimmfi' } | Select-Object -First 1
+        if ($tab) {
+            $expr = "fetch('" + $sync.Url + "',{cache:'no-store'}).then(function(r){return r.text()})"
+            $html = Invoke-CdpEval -WsUrl $tab.webSocketDebuggerUrl -Expression $expr
+            if ($html -and $html -match 'id="online"' -and $html -notmatch 'Just a moment') {
+                $sync.Html = $html; $sync.Seq = [int]$sync.Seq + 1; $sync.Status = 'ok'; $sync.LastOk = Get-Date
+            } else { $sync.Status = 'connecting' }
+        } else { $sync.Status = 'connecting' }
+    } catch { $sync.Status = 'error'; $sync.Err = $_.Exception.Message }
+    # 接続済みなら 16 秒間隔、未接続なら 1.5 秒間隔で素早く再試行。Stop には即応。
+    $waitMs = if ($sync.Status -eq 'ok') { 16000 } else { 1500 }
+    $slept = 0
+    while ($slept -lt $waitMs -and -not $sync.Stop) { Start-Sleep -Milliseconds 200; $slept += 200 }
+}
+'@
+$workerScript = "function Invoke-CdpEval {`n$((Get-Command Invoke-CdpEval).Definition)`n}`n" + $workerBody
 
-# 終了時: 起動した Chrome/Edge を確実に閉じる
+$bgRunspace = [runspacefactory]::CreateRunspace()
+$bgRunspace.ApartmentState = 'MTA'
+$bgRunspace.ThreadOptions = 'ReuseThread'
+$bgRunspace.Open()
+$bgRunspace.SessionStateProxy.SetVariable('sync', $sync)
+$bgPs = [powershell]::Create()
+$bgPs.Runspace = $bgRunspace
+[void]$bgPs.AddScript($workerScript)
+$bgHandle = $bgPs.BeginInvoke()
+
+# ----------------------------------------------------------------------------
+# UI 側: 軽量タイマー（250ms）。新着データ(Seq 変化)のときだけ描画する。
+# ----------------------------------------------------------------------------
+$script:LastSeq = -1
+$uiTimer = New-Object System.Windows.Forms.Timer
+$uiTimer.Interval = 250
+$uiTimer.Add_Tick({
+        if ($sync.Seq -ne $script:LastSeq) {
+            $script:LastSeq = $sync.Seq
+            Render-Players -Html $sync.Html
+            $status.Text = ("Online: {0} players   /   Last updated {1}   /   source: wiimmfi.de (via {2})" -f $script:OnlineCount, (Get-Date -Format 'HH:mm:ss'), (Split-Path $browser -Leaf))
+        }
+        elseif ($script:LastSeq -lt 0) {
+            if ($sync.Status -eq 'error') { $status.Text = "Retrying...  " + $sync.Err + "  (" + (Get-Date -Format 'HH:mm:ss') + ")" }
+            else { $status.Text = "Connecting... (Cloudflare を通過中。初回は数秒〜十数秒かかります)" }
+        }
+    })
+$form.Add_Shown({ $uiTimer.Start() })
+
+# 終了時: タイマー停止 → ワーカー停止 → 起動した Chrome/Edge を確実に閉じる
 $form.Add_FormClosing({
-    try { $timer.Stop() } catch {}
-    try { if ($proc -and -not $proc.HasExited) { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } } catch {}
-})
+        try { $uiTimer.Stop() } catch {}
+        try { $sync.Stop = $true } catch {}
+        try { Start-Sleep -Milliseconds 120 } catch {}
+        try { $bgPs.Stop() } catch {}
+        try { $bgPs.Dispose() } catch {}
+        try { $bgRunspace.Dispose() } catch {}
+        try { if ($proc -and -not $proc.HasExited) { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } } catch {}
+    })
 
 if ($SelfTest) {
-    # --- 診断モード: GUI を表示せず、取得→解析→描画更新を1回実行してログ出力 ---
+    # --- 診断モード: GUI を表示せず、実際のバックグラウンドワーカー経由で
+    #     取得→解析→描画更新を行い結果をログ出力（並行処理の経路も検証する） ---
     $log = Join-Path $env:TEMP 'mph_selftest.log'
     Remove-Item $log -EA SilentlyContinue
     function L($m) { Add-Content -Path $log -Value $m -Encoding UTF8 }
     try {
         L "FORM BUILT OK; controls=$($form.Controls.Count)"
-        $deadline = (Get-Date).AddSeconds(45); $ok = $false
-        while ((Get-Date) -lt $deadline) { $h = Get-StatsHtml -Port $Port; if ($h) { $ok = $true; break }; Start-Sleep -Milliseconds 1500 }
-        L "Cloudflare passed=$ok"
-        Refresh-Data
+        # バックグラウンドワーカー($bgPs)は既に起動済み。Seq が進む＝取得成功。
+        $deadline = (Get-Date).AddSeconds(45)
+        while ((Get-Date) -lt $deadline -and [int]$sync.Seq -lt 1) { Start-Sleep -Milliseconds 250 }
+        L "Worker Seq=$($sync.Seq)  Status=$($sync.Status)"
+        Render-Players -Html $sync.Html
         L "ListBox items=$($list.Items.Count)"
         for ($i = 0; $i -lt $list.Items.Count; $i++) { L ("  item[$i]=" + $list.Items[$i]) }
         if ($list.Items.Count -gt 0) {
@@ -440,11 +501,17 @@ if ($SelfTest) {
             L ("Join=" + $detail.Join.Text + " | Game=" + $detail.Game.Text + " | Num=" + $detail.Num.Text)
             L ("Mode1.Image set=" + ($picMode1.Image -ne $null) + " | Friends.Vis=" + $lblFriends.Visible + " | Rivals.Vis=" + $lblRivals.Visible)
         }
+        # 2 回目の取得（Seq がさらに進むこと＝定期更新が回ることを確認）
+        $seq1 = [int]$sync.Seq
+        $deadline2 = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline2 -and [int]$sync.Seq -le $seq1) { Start-Sleep -Milliseconds 250 }
+        L ("Second update: Seq " + $seq1 + " -> " + $sync.Seq)
         L ("Status bar=" + $status.Text)
         L "RESULT: SUCCESS"
     } catch {
         L ("EXCEPTION: " + $_.Exception.Message); L ($_.ScriptStackTrace)
     } finally {
+        try { $sync.Stop = $true; Start-Sleep -Milliseconds 150; $bgPs.Stop(); $bgPs.Dispose(); $bgRunspace.Dispose() } catch {}
         try { if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -EA SilentlyContinue } } catch {}
     }
     return
