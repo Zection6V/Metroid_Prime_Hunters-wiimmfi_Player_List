@@ -14,6 +14,12 @@
 - **更新間隔**: 16 秒ごと（`SetTimer, refreshPlayerData, 16000`）。
 - **オリジナル作者**: elModo7。本リポジトリはそのプレイヤーリストツール。
 
+> ⚠️ **重要（2026 時点）**: データ源 `wiimmfi.de` は現在 **Cloudflare の JS チャレンジ**
+> （"Just a moment..."）で保護されている。AHK 版が使う単純な HTTP GET
+> （`WinHttp.WinHttpRequest`）は **403 Forbidden** になり、現状この AHK 版は動かない。
+> 追加インストール不要で動かせるよう移植した PowerShell 版を別途用意した
+> （[簡単に動かす（インストール不要版）](#簡単に動かすインストール不要版) を参照）。
+
 ## 実行時の動作
 
 1. 起動時に `FileInstall` で `img\*.png`・`fonts\*.ttf` を `%A_Temp%` へ展開する
@@ -99,6 +105,50 @@
 - Windows 専用（`WinHttp` COM、`gdi32`/`AddFontResourceEx` などの DllCall）。
 - `img/`・`fonts/` ディレクトリが `FileInstall` のソースとして必要（ビルド時）。
 - 実行時にネットワーク到達性（wiimmfi.de）が必要。
+
+## 簡単に動かす（インストール不要版）
+
+AHK 版が Cloudflare で動かなくなったため、**Windows 標準の PowerShell + WinForms** で
+再実装した移植版を同梱している。追加インストールは不要。
+
+| ファイル | 役割 |
+|---|---|
+| `MPH-PlayerList.ps1` | 本体。Chrome/Edge を CDP 経由で操作してデータ取得 → 解析 → GUI 表示 |
+| `Run MPH Player List.bat` | ダブルクリック用ランチャー（`powershell -STA` で `.ps1` を起動） |
+
+### 使い方
+
+1. `Run MPH Player List.bat` をダブルクリックするだけ。
+2. 初回は Cloudflare 通過のため数秒〜十数秒待つ（"Connecting..." 表示）。
+3. 16 秒ごとに自動更新。プレイヤーを選ぶと詳細（FC・状態・モード等）を表示。
+
+### 依存・前提
+
+- Windows + **PowerShell 5.1**（OS 標準）。
+- **Chrome** もしくは **Chromium 版 Edge** のいずれか（OS にほぼ標準で存在 / 追加導入不要）。
+  どちらも無い場合のみエラーダイアログを出す。
+
+### Cloudflare をどう突破しているか
+
+- 単純 GET は 403。そこで **PC のブラウザを「非ヘッドレス・画面外」で起動**し、
+  **DevTools Protocol(CDP)** に接続。ブラウザ自身が JS チャレンジを通過して
+  `cf_clearance` Cookie を得る（ヘッドレスは検知され通らないため非ヘッドレス）。
+- 通過後は、同一オリジンの **ページ内 `fetch()`** を CDP の `Runtime.evaluate` で実行し、
+  チャレンジ無しの生 HTML を取得する（毎回ナビゲーションし直さず軽量）。
+- 取得 HTML の `<table id="online">` を正規表現で行→セル分解。AHK 版の「14 行＝1 名」
+  決め打ちより堅牢。終了時に起動したブラウザを確実に kill する。
+
+### HTML 構造（移植時に確認した実データ）
+
+`<table id="online">` の列順は **12 列**:
+`id4 / pid / fc / host / gid / ls_stat / ol_stat / status / suspend / n / name1 / name2`。
+0 始まりで `fc=[2]`, `ls_stat=[5]`, `ol_stat=[6]`, `status=[7]`, `name1=[10]`
+（AHK 版の 1 始まりインデックス 3/6/7/8/11 に対応）。状態コードの意味は上表のとおり。
+
+### 診断モード
+
+`powershell -File "MPH-PlayerList.ps1" -SelfTest` で GUI を出さずに
+取得〜解析〜描画更新を 1 回だけ実行し、`%TEMP%\mph_selftest.log` に結果を書く。
 
 ## 改修時の注意点
 
