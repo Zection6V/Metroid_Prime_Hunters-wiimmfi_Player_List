@@ -150,6 +150,54 @@ AHK 版が Cloudflare で動かなくなったため、**Windows 標準の Power
 `powershell -File "MPH-PlayerList.ps1" -SelfTest` で GUI を出さずに
 取得〜解析〜描画更新を 1 回だけ実行し、`%TEMP%\mph_selftest.log` に結果を書く。
 
+## WiiLink WFC 版（別サービス対応）
+
+wiimmfi とは別の私設サービス **WiiLink WFC**（`wfc.wiilink24.com`）向けの移植版も同梱。
+
+| ファイル | 役割 |
+|---|---|
+| `WiiLink-PlayerList.ps1` | 本体。JSON API を直接叩いて取得 → ルーム/プレイヤーをツリー表示 |
+| `Run WiiLink Player List.bat` | ダブルクリック用ランチャー |
+
+### wiimmfi 版との違い
+
+- **ブラウザ不要**。WiiLink は Cloudflare 等の保護が無く、公式 JSON API を素の
+  HTTP GET で取得できる（CDP 経由が必要だった wiimmfi 版より大幅に軽量）。
+- **データモデルがルーム中心**。プレイヤーは「グループ（ルーム）」に属する。
+  そのため GUI は ListBox ではなく **TreeView（ルーム → プレイヤー）**。
+
+### データ源（JSON API）
+
+- `https://api.wfc.wiilink24.com/api/stats` — 全ゲームの集計
+  `{ "global": {...}, "mprimeds": { "online", "active", "groups" }, ... }`
+- `https://api.wfc.wiilink24.com/api/groups` — ルーム配列。`game == "mprimeds"` で絞る。
+
+各 group（ルーム）の構造:
+
+| フィールド | 意味 |
+|---|---|
+| `id` | ルーム ID（例 `VFZRTO`） |
+| `created` | 作成時刻（ISO8601 / UTC） |
+| `type` | `anybody`→**Public** / `private`→**Friends** |
+| `suspend` | `true`→**Not joinable** / `false`→**Joinable** |
+| `host` | ホストの players キー（例 `"0"`） |
+| `players` | `"0","1",...` をキーにしたオブジェクト |
+
+各 player の構造: `name` / `fc`（フレンドコード）/ `pid` / `count` / `conn_fail` /
+`conn_map` / `suspend`。（`ev`=VR・`eb`=BR は Mario Kart 用で MPH には無い）
+
+> 補足: ページ `wfc.wiilink24.com/online/mprimeds` 自体はデータを含まず、
+> `/js/online_updater.js` が上記 API を 30 秒ごとに取得して描画している。
+> 本ツールはその API を直接叩く（15 秒間隔）。
+
+### 高パフォーマンス / 非ブロッキング設計（両版共通）
+
+ネットワーク取得は **別 runspace（バックグラウンドスレッド）** で実行し、結果を
+同期ハッシュテーブル経由で受け渡す。UI は 250ms の軽量タイマーで新着のみ拾って
+描画するため、取得中も**ウィンドウが固まらない**。さらに、前回と内容が変わらない
+ときは ListBox / TreeView を作り直さず、選択・展開状態を保持する。
+`-SelfTest` を付けると GUI 無しで取得〜解析〜描画更新を実行しログ出力する。
+
 ## 改修時の注意点
 
 - パースは HTML 構造依存。Wiimmfi 側変更で空表示・誤表示になり得る → 実 HTML で要確認。
