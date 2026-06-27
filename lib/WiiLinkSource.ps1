@@ -13,6 +13,11 @@
 
 . (Join-Path $PSScriptRoot 'I18n.ps1')
 
+# PowerShell 5.1 は環境によって既定で TLS 1.2 を有効化しておらず、HTTPS API が
+# "Could not create SSL/TLS secure channel" で失敗することがある。明示的に有効化する。
+try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
+try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls13 } catch {}
+
 function Get-WiiLinkData {
     param(
         [string]$StatsUrl  = 'https://api.wfc.wiilink24.com/api/stats',

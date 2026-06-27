@@ -66,8 +66,11 @@ function Update-WiiLinkTree {
     $d = $null; try { $d = $Json | ConvertFrom-Json } catch {}
     if (-not $d) { return }
     if (-not $d.ok) {
-        $Head.Text = "WiiLink  -  " + $I18n.connecting; $Head.ForeColor = $Colors.dim
-        if ($Tree.Nodes.Count -eq 0) { (Add-TreeChild $Tree $I18n.connectingNode $Colors.dim) | Out-Null }
+        # WiiLink は Cloudflare 等が無いので、ok でない＝実エラー。原因をそのまま表示する。
+        $msg = if ($d.error) { [string]$d.error } else { $I18n.connecting }
+        $col = if ($d.error) { $Colors.red } else { $Colors.dim }
+        $Head.Text = "WiiLink  -  " + $msg; $Head.ForeColor = $col
+        if ($Tree.Nodes.Count -eq 0) { (Add-TreeChild $Tree $msg $col) | Out-Null }
         return
     }
     $Head.ForeColor = $Colors.green
