@@ -56,8 +56,8 @@ $grid.Controls.Add($wl.Panel, 1, 0)
 
 $status = New-StatusBar -Theme $theme -Text "Starting..."
 
+# Dock の解決順のため Fill(grid) を先に、Top/Bottom を後に追加する（z-order 操作はしない）
 $form.Controls.Add($grid); $form.Controls.Add($bar.Panel); $form.Controls.Add($status)
-$grid.SendToBack(); $bar.Panel.BringToFront(); $status.BringToFront()
 
 # ============================================================================
 # バックグラウンドワーカー（サーバごとに別 runspace）

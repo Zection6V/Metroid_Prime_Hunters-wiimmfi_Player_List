@@ -36,8 +36,8 @@ $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 $bar = New-TopBar -Theme $theme -Title "Wiimmfi" -TitleColor $theme.orange
 $pane = New-TreePanel -Theme $theme -HeadColor $theme.cyan
 $status = New-StatusBar -Theme $theme
+# Dock の解決順のため Fill(コンテンツ) を先に、Top/Bottom を後に追加する（z-order 操作はしない）
 $form.Controls.Add($pane.Panel); $form.Controls.Add($bar.Panel); $form.Controls.Add($status)
-$pane.Panel.SendToBack(); $bar.Panel.BringToFront(); $status.BringToFront()
 
 # ---- ワーカー（Chrome を起動し /text を取得） ----
 $sync = [hashtable]::Synchronized(@{
