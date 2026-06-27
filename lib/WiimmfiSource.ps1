@@ -20,6 +20,15 @@ $script:WiimmfiDefaultUrl = 'https://wiimmfi.de/stats/game/mprimeds'
 # 実データ取得に使う軽量 text エンドポイント（'!' 区切りヘッダ + '|' 区切り行）
 $script:WiimmfiTextUrl = 'https://wiimmfi.de/stats/game/mprimeds/text'
 
+# ---- 状態コードの日本語化（Tampermonkey 版 "Wiimfi MPH Stats Translator JP" 準拠） ----
+# ol_stat はフラグ文字列で 1 文字ずつ意味を持つ。大文字小文字を区別する必要があるため
+# （G=グローバル と g=ゲスト, C=ルーム接続中 と c=リージョン）、解読は switch -CaseSensitive で行う。
+# status は数値なので通常のハッシュで対応。
+$script:WiimmfiStatusMap = @{
+    '0' = 'オフライン'; '1' = 'オンライン（待機中）'; '2' = 'ルーム/グローバルのゲスト'
+    '3' = 'グローバル検索中'; '4' = 'プライベートルーム接続中'; '5' = 'ルーム/グローバルのホスト'; '6' = 'ホスト'
+}
+
 function Find-Browser {
     $cands = @(
         (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" -EA SilentlyContinue).'(default)',
@@ -115,10 +124,23 @@ function ConvertTo-WiimmfiPlayer {
     if ($rivals -and $friends) { $res.JoinPlayers = 'Friends and Rivals' }
     elseif ($rivals) { $res.JoinPlayers = 'Rivals Only' }
     elseif ($friends) { $res.JoinPlayers = 'Friends Only' }
-    switch ($p[6]) { 'o' { $res.OnlineStatus = 'Online' } 'og' { $res.OnlineStatus = 'Guest of Room' } 'oGv' { $res.OnlineStatus = 'In Game' } 'oGvS' { $res.OnlineStatus = 'Searching for Game' } }
-    switch ("$($p[7])") { '1' { $res.PlayerStatus = 'Online' } '2' { $res.PlayerStatus = 'Guest Room' } '3' { $res.PlayerStatus = 'Searching Opponents' } '5' { $res.PlayerStatus = 'Joining Game' } '6' { $res.PlayerStatus = 'Hosting Game' } }
-    if ($ls -eq '0' -and "$($p[7])" -eq '6') { $res.OnlineStatus = 'In-Game (Host)'; $res.NumPlayers = 'Unknown'; $res.GameInfo = 'Unknown' }
-    elseif ($ls -eq '0' -and "$($p[7])" -eq '2') { $res.OnlineStatus = 'In-Game (Client)'; $res.NumPlayers = 'Unknown'; $res.GameInfo = 'Unknown' }
+    # ol_stat（フラグ文字列）を 1 文字ずつ日本語化し ＋ で連結（大文字小文字を区別）
+    $ol = [string]$p[6]
+    if ($ol) {
+        $parts = foreach ($ch in $ol.ToCharArray()) {
+            switch -CaseSensitive ([string]$ch) {
+                'o' { 'オンライン' } 'P' { 'プライベートルーム' } 'G' { 'グローバル' } 'c' { 'リージョン' }
+                'w' { 'ワールドワイド' } 'A' { 'アクティブ' } 'R' { 'レース' } 'B' { 'バトル' }
+                'h' { 'ホスト' } 'g' { 'ゲスト' } 'v' { '観戦者' } 'S' { 'グローバル検索中' } 'C' { 'ルーム接続中' }
+                default { [string]$ch }
+            }
+        }
+        $res.OnlineStatus = ($parts -join '＋')
+    }
+    # status（数値）を日本語化
+    $st = [string]$p[7]
+    if ($script:WiimmfiStatusMap.ContainsKey($st)) { $res.PlayerStatus = $script:WiimmfiStatusMap[$st] }
+    elseif ($st) { $res.PlayerStatus = $st }
     return $res
 }
 

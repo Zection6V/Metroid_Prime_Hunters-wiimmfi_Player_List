@@ -85,19 +85,35 @@
 - **桁 8 — Friends フラグ**: `8` なら Friends アイコン表示
 - 桁 7・8 の組み合わせで「Join Players」を Friends Only / Rivals Only / Friends and Rivals と表示
 
-### フィールド 7（オンライン状態文字列）
+### フィールド 7（ol_stat / オンライン状態フラグ文字列）
 
-- `o` = Online
-- `og` = Guest of Room
-- `oGv` = In Game
-- `oGvS` = Searching for Game
+ol_stat は **1 文字ずつ意味を持つフラグ列**（例 `oGvS` = 4 つの状態の合成）。
+PowerShell 版（`WiimmfiSource.ps1` の `ConvertTo-WiimmfiPlayer`）は、Tampermonkey 版
+"Wiimfi MPH Stats Translator JP" を参考に各文字を**日本語化して ＋ で連結**する。
+大文字小文字を区別する（`G`=グローバル と `g`=ゲスト、`C`=ルーム接続中 と `c`=リージョン）
+ため `switch -CaseSensitive` を使う。
 
-### フィールド 8（プレイヤー状態コード）
+| 文字 | 意味 | 文字 | 意味 |
+|---|---|---|---|
+| `o` | オンライン | `g` | ゲスト |
+| `P` | プライベートルーム | `v` | 観戦者 |
+| `G` | グローバル | `S` | グローバル検索中 |
+| `c` | リージョン | `C` | ルーム接続中 |
+| `w` | ワールドワイド | `A` | アクティブ |
+| `h` | ホスト | `R` / `B` | レース / バトル |
 
-- `1` = Online / `2` = Guest Room / `3` = Searching Opponents / `5` = Joining Game / `6` = Hosting Game
-- 加えて `ls_stat = 0` のときの特例:
-  - `8 = 6` → In-Game (Host)（人数・モードは Unknown）
-  - `8 = 2` → In-Game (Client)（同上）
+例: `oGvS` → 「オンライン＋グローバル＋観戦者＋グローバル検索中」
+
+### フィールド 8（status / プレイヤー状態コード）
+
+数値を日本語化（`$script:WiimmfiStatusMap`）:
+
+- `0` = オフライン / `1` = オンライン（待機中）/ `2` = ルーム/グローバルのゲスト
+- `3` = グローバル検索中 / `4` = プライベートルーム接続中
+- `5` = ルーム/グローバルのホスト / `6` = ホスト
+
+> 旧 AHK 版は英語かつ `ls_stat=0` の In-Game 特例を持っていたが、char 単位の ol_stat
+> デコードで状態が十分表現できるため、PowerShell 版では特例を廃し上記マップに統一した。
 
 ## 依存・前提
 
