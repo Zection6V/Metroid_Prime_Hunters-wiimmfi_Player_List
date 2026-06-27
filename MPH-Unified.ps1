@@ -66,7 +66,7 @@ $sync = [hashtable]::Synchronized(@{
         WiimmfiLib = $WiimmfiLib; WiiLinkLib = $WiiLinkLib
         WiimmfiUrl = 'https://wiimmfi.de/stats/game/mprimeds'
         Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'
-        IntervalMs = 30000; Stop = $false
+        IntervalMs = 30000; Stop = $false; WiimmfiRefresh = $false; WiiLinkRefresh = $false
         WiimmfiJson = $null; WiimmfiSeq = 0; WiimmfiStatus = 'starting'; WiimmfiPid = 0
         WiiLinkJson = $null; WiiLinkSeq = 0; WiiLinkStatus = 'starting'
     })
@@ -87,7 +87,8 @@ try {
         $sync.WiimmfiSeq = [int]$sync.WiimmfiSeq + 1
         $sync.WiimmfiStatus = if ($data.ok) { 'ok' } else { 'connecting' }
         $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
-        $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop) { Start-Sleep -Milliseconds 200; $slept += 200 }
+        $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop -and -not $sync.WiimmfiRefresh) { Start-Sleep -Milliseconds 200; $slept += 200 }
+        $sync.WiimmfiRefresh = $false   # Refresh ボタンで待機を打ち切り即時再取得
     }
 } finally { Stop-WiimmfiBrowser -Proc $ctx.proc }
 '@
@@ -100,7 +101,8 @@ while (-not $sync.Stop) {
     $sync.WiiLinkSeq = [int]$sync.WiiLinkSeq + 1
     $sync.WiiLinkStatus = if ($data.ok) { 'ok' } else { 'error' }
     $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
-    $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop) { Start-Sleep -Milliseconds 200; $slept += 200 }
+    $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop -and -not $sync.WiiLinkRefresh) { Start-Sleep -Milliseconds 200; $slept += 200 }
+    $sync.WiiLinkRefresh = $false   # Refresh ボタンで待機を打ち切り即時再取得
 }
 '@
 
@@ -111,6 +113,7 @@ $wlJob = Start-PollWorker -Sync $sync -Body $wlWorker
 # UI タイマー（描画は lib\TreeRender.ps1 の共有関数に委譲）
 # ============================================================================
 $bar.Combo.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$bar.IntervalMap[[string]$bar.Combo.SelectedItem] })
+$bar.Refresh.Add_Click({ $sync.WiimmfiRefresh = $true; $sync.WiiLinkRefresh = $true; $status.Text = "Refreshing..." })
 
 $script:WmLastSeq = -1; $script:WlLastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer

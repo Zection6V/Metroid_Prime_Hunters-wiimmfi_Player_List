@@ -54,10 +54,18 @@ function New-TopBar {
     $map = [ordered]@{ '15 sec' = 15000; '30 sec' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
     foreach ($k in $map.Keys) { [void]$cmb.Items.Add($k) }
     $cmb.SelectedItem = '30 sec'
-    $flow.Controls.Add($cap); $flow.Controls.Add($cmb)
+
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Text = "↻ Refresh"; $btn.AutoSize = $true; $btn.FlatStyle = 'Flat'
+    $btn.BackColor = $Theme.bgDark; $btn.ForeColor = $Theme.cream
+    $btn.FlatAppearance.BorderColor = $Theme.dim
+    $btn.Margin = New-Object System.Windows.Forms.Padding(0, 2, 14, 0)
+    $btn.Padding = New-Object System.Windows.Forms.Padding(6, 2, 6, 2)
+
+    $flow.Controls.Add($btn); $flow.Controls.Add($cap); $flow.Controls.Add($cmb)
     $top.Controls.Add($flow)
 
-    return @{ Panel = $top; Combo = $cmb; IntervalMap = $map }
+    return @{ Panel = $top; Combo = $cmb; IntervalMap = $map; Refresh = $btn }
 }
 
 function New-TreePanel {

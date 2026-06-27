@@ -42,7 +42,7 @@ $pane.Panel.SendToBack(); $bar.Panel.BringToFront(); $status.BringToFront()
 # ---- ワーカー（Chrome を起動し /text を取得） ----
 $sync = [hashtable]::Synchronized(@{
         WiimmfiLib = $WiimmfiLib; WiimmfiUrl = 'https://wiimmfi.de/stats/game/mprimeds'
-        IntervalMs = 30000; Stop = $false; Json = $null; Seq = 0; Status = 'starting'; Pid = 0
+        IntervalMs = 30000; Stop = $false; Refresh = $false; Json = $null; Seq = 0; Status = 'starting'; Pid = 0
     })
 $worker = @'
 . $sync.WiimmfiLib
@@ -60,7 +60,8 @@ try {
         $sync.Seq = [int]$sync.Seq + 1
         $sync.Status = if ($data.ok) { 'ok' } else { 'connecting' }
         $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
-        $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop) { Start-Sleep -Milliseconds 200; $slept += 200 }
+        $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop -and -not $sync.Refresh) { Start-Sleep -Milliseconds 200; $slept += 200 }
+        $sync.Refresh = $false   # Refresh ボタンで待機を打ち切り即時再取得
     }
 } finally { Stop-WiimmfiBrowser -Proc $ctx.proc }
 '@
@@ -68,6 +69,7 @@ $job = Start-PollWorker -Sync $sync -Body $worker
 
 # ---- UI タイマー ----
 $bar.Combo.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$bar.IntervalMap[[string]$bar.Combo.SelectedItem] })
+$bar.Refresh.Add_Click({ $sync.Refresh = $true; $status.Text = "Refreshing..." })
 $script:LastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 300

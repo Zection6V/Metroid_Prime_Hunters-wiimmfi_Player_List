@@ -41,7 +41,7 @@ $pane.Panel.SendToBack(); $bar.Panel.BringToFront(); $status.BringToFront()
 # ---- ワーカー ----
 $sync = [hashtable]::Synchronized(@{
         WiiLinkLib = $WiiLinkLib; Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'
-        IntervalMs = 30000; Stop = $false; Json = $null; Seq = 0; Status = 'starting'
+        IntervalMs = 30000; Stop = $false; Refresh = $false; Json = $null; Seq = 0; Status = 'starting'
     })
 $worker = @'
 . $sync.WiiLinkLib
@@ -51,13 +51,15 @@ while (-not $sync.Stop) {
     $sync.Seq = [int]$sync.Seq + 1
     $sync.Status = if ($data.ok) { 'ok' } else { 'error' }
     $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
-    $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop) { Start-Sleep -Milliseconds 200; $slept += 200 }
+    $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop -and -not $sync.Refresh) { Start-Sleep -Milliseconds 200; $slept += 200 }
+    $sync.Refresh = $false   # Refresh ボタンで待機を打ち切り即時再取得
 }
 '@
 $job = Start-PollWorker -Sync $sync -Body $worker
 
 # ---- UI タイマー ----
 $bar.Combo.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$bar.IntervalMap[[string]$bar.Combo.SelectedItem] })
+$bar.Refresh.Add_Click({ $sync.Refresh = $true; $status.Text = "Refreshing..." })
 $script:LastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 300

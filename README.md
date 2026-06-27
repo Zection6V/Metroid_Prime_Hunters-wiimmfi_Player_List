@@ -5,7 +5,8 @@ A simple tool to see who is connected online and their gamemode/online status.
 
 Three viewers are provided. All use Windows' built-in PowerShell, so nothing
 extra needs to be installed. Each viewer lets you pick the polling interval
-(15s / 30s / 1m / 2m / 5m, default 30s — gentle on the servers).
+(15s / 30s / 1m / 2m / 5m, default 30s — gentle on the servers), and has a
+**↻ Refresh** button for an immediate update without waiting for the next poll.
 
 | Double-click | Shows |
 |---|---|
