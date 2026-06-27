@@ -10,7 +10,7 @@ extra needs to be installed. Each viewer lets you pick the polling interval
 | Double-click | Shows |
 |---|---|
 | **`Run MPH Unified.bat`** | Both servers side-by-side in one window |
-| **`Run MPH Player List.bat`** | Wiimmfi only |
+| **`Run Wiimmfi Player List.bat`** | Wiimmfi only |
 | **`Run WiiLink Player List.bat`** | WiiLink WFC only |
 
 - **Wiimmfi** (`wiimmfi.de`) is behind a Cloudflare JavaScript challenge, so it
@@ -27,9 +27,10 @@ extra needs to be installed. Each viewer lets you pick the polling interval
 ```
 lib/WiimmfiSource.ps1   data fetch — Wiimmfi (browser/CDP + /text parsing)
 lib/WiiLinkSource.ps1   data fetch — WiiLink (JSON API)
-lib/TreeRender.ps1      shared TreeView rendering
+lib/TreeRender.ps1      presentation — shared TreeView rendering
+lib/ViewerCommon.ps1    UI parts — theme, top bar + interval, tree panel, poll worker
 MPH-Unified.ps1         viewer — both servers
-MPH-PlayerList.ps1      viewer — Wiimmfi only
+Wiimmfi-PlayerList.ps1  viewer — Wiimmfi only
 WiiLink-PlayerList.ps1  viewer — WiiLink only
 ```
 
