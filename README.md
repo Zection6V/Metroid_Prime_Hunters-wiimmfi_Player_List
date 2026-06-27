@@ -3,22 +3,35 @@ A simple tool to see who is connected online and their gamemode/online status.
 
 ## How to run (no install needed)
 
-Two services are supported. Both use Windows' built-in PowerShell, so nothing
-extra needs to be installed.
+Three viewers are provided. All use Windows' built-in PowerShell, so nothing
+extra needs to be installed. Each viewer lets you pick the polling interval
+(15s / 30s / 1m / 2m / 5m, default 30s — gentle on the servers).
 
-### Wiimmfi — double-click `Run MPH Player List.bat`
-Shows players on **wiimmfi.de**. It requires **Chrome** or **Chromium-based Edge**
-to be present, because `wiimmfi.de` is now behind a Cloudflare JavaScript
-challenge — the tool drives a real browser off-screen to pass the challenge,
-then reads the stats.
+| Double-click | Shows |
+|---|---|
+| **`Run MPH Unified.bat`** | Both servers side-by-side in one window |
+| **`Run MPH Player List.bat`** | Wiimmfi only |
+| **`Run WiiLink Player List.bat`** | WiiLink WFC only |
+
+- **Wiimmfi** (`wiimmfi.de`) is behind a Cloudflare JavaScript challenge, so it
+  requires **Chrome** or **Chromium-based Edge**: the tool drives a real browser
+  off-screen to pass the challenge, then reads the lightweight `/text` endpoint.
+- **WiiLink WFC** (`wfc.wiilink24.com`) needs **no browser** — it exposes a plain
+  JSON API. Rooms are shown as a tree (room → players); expand a node for details.
 
 > The original `MPH Wimmfi Player List.ahk` (AutoHotkey v1) used a plain HTTP GET,
-> which Cloudflare now blocks (403). `MPH-PlayerList.ps1` is the working port.
+> which Cloudflare now blocks (403). The PowerShell viewers are the working ports.
 
-### WiiLink WFC — double-click `Run WiiLink Player List.bat`
-Shows rooms/players on **WiiLink WFC** (`wfc.wiilink24.com`). This one needs
-**no browser at all** — WiiLink exposes a plain JSON API, so it just makes HTTP
-requests. Rooms are shown as a tree (room → players); select a node for details.
+### Project layout (SRP)
+
+```
+lib/WiimmfiSource.ps1   data fetch — Wiimmfi (browser/CDP + /text parsing)
+lib/WiiLinkSource.ps1   data fetch — WiiLink (JSON API)
+lib/TreeRender.ps1      shared TreeView rendering
+MPH-Unified.ps1         viewer — both servers
+MPH-PlayerList.ps1      viewer — Wiimmfi only
+WiiLink-PlayerList.ps1  viewer — WiiLink only
+```
 
 
 Sample Images:

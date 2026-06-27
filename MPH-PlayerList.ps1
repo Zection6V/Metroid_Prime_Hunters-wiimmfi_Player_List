@@ -1,518 +1,161 @@
 ﻿<#
-    MPH Wiimmfi Player List  (PowerShell + WinForms edition)
-    --------------------------------------------------------
-    元の "MPH Wimmfi Player List.ahk"（AutoHotkey v1）を、追加インストール不要で
-    Windows 上で動かせるように移植したもの。
+    Wiimmfi - MPH Player List  (Wiimmfi 専用ビューワ)  — PowerShell + WinForms
+    -------------------------------------------------------------------------
+    wiimmfi.de のオンラインプレイヤーと状態を表示する。
 
-    データ元 https://wiimmfi.de/stats/game/mprimeds は現在 Cloudflare の
-    JavaScript チャレンジで保護されているため、単純な HTTP GET（元の AHK の方式）は
-    403 になる。そこで PC に入っている Chrome/Edge を「非ヘッドレス・画面外」で起動し、
-    DevTools Protocol(CDP) 経由でページ内 fetch を実行してチャレンジ通過後の HTML を取得する。
+    責務分離（SRP）:
+      lib\WiimmfiSource.ps1 … 情報取得（Chrome/Edge を CDP 経由で操作し Cloudflare 通過、
+                              軽量 /text エンドポイントを取得・解析）
+      lib\TreeRender.ps1    … TreeView 描画
+      本ファイル            … 画面構成と進行
 
-    依存:
-      - Windows + PowerShell 5.1+（標準搭載）
-      - Chrome もしくは Chromium 版 Edge（どちらか一方でよい / 追加インストール不要）
-    起動:  "Run MPH Player List.bat" をダブルクリック。
-    （-SelfTest を付けると GUI を表示せず取得〜解析〜描画更新だけ実行しログ出力する診断モード）
+    依存: Windows + PowerShell 5.1。Chrome もしくは Chromium 版 Edge が必要。
+    起動: "Run MPH Player List.bat"。 -SelfTest で診断モード。
 #>
 param([switch]$SelfTest)
 
 Set-StrictMode -Off
 $ErrorActionPreference = 'Stop'
-
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ImgDir    = Join-Path $ScriptDir 'img'
-$Url       = 'https://wiimmfi.de/stats/game/mprimeds'
+$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$WiimmfiLib = Join-Path $ScriptDir 'lib\WiimmfiSource.ps1'
+. $WiimmfiLib
+. (Join-Path $ScriptDir 'lib\TreeRender.ps1')
 
-# ----------------------------------------------------------------------------
-# ブラウザ検出
-# ----------------------------------------------------------------------------
-function Find-Browser {
-    $cands = @(
-        (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" -EA SilentlyContinue).'(default)',
-        (Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" -EA SilentlyContinue).'(default)',
-        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
-        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
-        (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe" -EA SilentlyContinue).'(default)',
-        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
-        "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
-    )
-    foreach ($c in $cands) { if ($c -and (Test-Path $c)) { return $c } }
-    return $null
-}
-
-function Get-FreePort {
-    $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-    $l.Start(); $p = $l.LocalEndpoint.Port; $l.Stop(); return $p
-}
-
-# ----------------------------------------------------------------------------
-# CDP 経由でページ内 JavaScript を評価して結果(文字列)を返す
-# ----------------------------------------------------------------------------
-function Invoke-CdpEval {
-    param([string]$WsUrl, [string]$Expression, [int]$TimeoutSec = 20)
-    $ws = New-Object System.Net.WebSockets.ClientWebSocket
-    $cts = New-Object System.Threading.CancellationTokenSource ([TimeSpan]::FromSeconds($TimeoutSec))
-    $ct = $cts.Token
-    try {
-        $ws.ConnectAsync([Uri]$WsUrl, $ct).Wait()
-        $payload = @{
-            id     = 1
-            method = 'Runtime.evaluate'
-            params = @{ expression = $Expression; returnByValue = $true; awaitPromise = $true }
-        } | ConvertTo-Json -Depth 6 -Compress
-        $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
-        $ws.SendAsync([ArraySegment[byte]]::new($bytes), 'Text', $true, $ct).Wait()
-        $sb = New-Object Text.StringBuilder
-        $buf = New-Object byte[] 131072
-        do {
-            $r = $ws.ReceiveAsync([ArraySegment[byte]]::new($buf), $ct)
-            $r.Wait()
-            [void]$sb.Append([Text.Encoding]::UTF8.GetString($buf, 0, $r.Result.Count))
-        } while (-not $r.Result.EndOfMessage)
-        $json = $sb.ToString() | ConvertFrom-Json
-        return $json.result.result.value
-    }
-    finally {
-        try { $ws.Dispose() } catch {}
-        try { $cts.Dispose() } catch {}
-    }
-}
-
-function Get-DebugWsUrl {
-    param([int]$Port)
-    $tabs = Invoke-RestMethod "http://127.0.0.1:$Port/json" -TimeoutSec 10
-    $tab = $tabs | Where-Object { $_.type -eq 'page' -and $_.url -match 'wiimmfi' } | Select-Object -First 1
-    if (-not $tab) { $tab = $tabs | Where-Object { $_.type -eq 'page' } | Select-Object -First 1 }
-    return $tab.webSocketDebuggerUrl
-}
-
-# 最新の HTML を取得（チャレンジ中なら $null を返す）
-function Get-StatsHtml {
-    param([int]$Port)
-    try {
-        $ws = Get-DebugWsUrl -Port $Port
-        if (-not $ws) { return $null }
-        $expr = "fetch('$Url',{cache:'no-store'}).then(function(r){return r.text()})"
-        $html = Invoke-CdpEval -WsUrl $ws -Expression $expr
-        if ($html -and $html -match 'id="online"' -and $html -notmatch 'Just a moment') { return $html }
-        return $null
-    } catch { return $null }
-}
-
-# ----------------------------------------------------------------------------
-# HTML パース  ->  プレイヤー配列の配列
-#   各 player[] : 0=id4 1=pid 2=fc 3=host 4=gid 5=ls_stat 6=ol_stat 7=status 8=suspend 9=n 10=name1 11=name2
-# ----------------------------------------------------------------------------
-function Parse-Players {
-    param([string]$Html)
-    $players = @()
-    $s = $Html.IndexOf('<table id="online"')
-    if ($s -lt 0) { return $players }
-    $e = $Html.IndexOf('</table>', $s)
-    if ($e -lt 0) { $e = $Html.Length }
-    $tbl = $Html.Substring($s, $e - $s)
-    $rows = [regex]::Matches($tbl, '(?s)<tr class="tr\d+">(.*?)</tr>')
-    foreach ($r in $rows) {
-        $cells = [regex]::Matches($r.Groups[1].Value, '(?s)<td[^>]*>(.*?)</td>')
-        $arr = @()
-        foreach ($c in $cells) {
-            $v = $c.Groups[1].Value
-            $v = $v -replace '&mdash;', '-'
-            $v = $v -replace '&#x200B;', ''
-            $v = ($v -replace '<[^>]+>', '').Trim()
-            $arr += $v
-        }
-        if ($arr.Count -ge 11) { $players += , $arr }
-    }
-    return , $players   # 先頭のカンマで単一要素配列のアンロールを防ぐ
-}
-
-# ----------------------------------------------------------------------------
-# 状態コードのデコード（元 AHK の selectPlayer ロジックを移植）
-# ----------------------------------------------------------------------------
-function Decode-Player {
-    param($p)
-    $res = [ordered]@{
-        Name = ''; Fc = ''; OnlineStatus = ''; PlayerStatus = ''
-        JoinPlayers = ''; GameInfo = ''; NumPlayers = ''
-        Mode1 = $null; Mode2 = $null; ShowFriends = $false; ShowRivals = $false
-    }
-    $res.Name = $p[10]
-    $res.Fc   = $p[2]
-
-    # --- ls_stat (index 5) ---
-    $ls = $p[5]
-    $v = "$ls"
-    while ($v.Length -lt 7) { $v = '0' + $v }
-    if ($v.Length -lt 8) { $v = '1' + $v }
-    $d = $v.ToCharArray()   # d[0]=桁1 ... d[7]=桁8
-    $rivals = $false
-    switch ("$($d[0])") {           # 桁1: 人数
-        '1' { $res.NumPlayers = '1' }
-        '2' { $res.NumPlayers = '2' }
-        '4' { $res.NumPlayers = '3' }
-        '6' { $res.NumPlayers = '4' }
-    }
-    switch ("$($d[1])") {           # 桁2: モード
-        '0' { $res.GameInfo = 'Survival / None';       $res.Mode1 = 'survival.png' }
-        '1' { $res.GameInfo = 'Battle / Bounty';       $res.Mode1 = 'battle.png';     $res.Mode2 = 'bounty.png' }
-        '2' { $res.GameInfo = 'Defender / Capture';    $res.Mode1 = 'defender.png';   $res.Mode2 = 'capture.png' }
-        '3' { $res.GameInfo = 'Prime Hunter / Nodes';  $res.Mode1 = 'primehunter.png';$res.Mode2 = 'nodes.png' }
-    }
-    if ("$($d[6])" -eq '1') { $rivals = $true; $res.ShowRivals = $true }   # 桁7: Rivals
-    $friends = ("$($d[7])" -eq '8')                                        # 桁8: Friends
-    if ($friends) { $res.ShowFriends = $true }
-    if ($rivals -and $friends) { $res.JoinPlayers = 'Friends and Rivals' }
-    elseif ($rivals)           { $res.JoinPlayers = 'Rivals Only' }
-    elseif ($friends)          { $res.JoinPlayers = 'Friends Only' }
-
-    # --- ol_stat (index 6) ---
-    switch ($p[6]) {
-        'o'    { $res.OnlineStatus = 'Online' }
-        'og'   { $res.OnlineStatus = 'Guest of Room' }
-        'oGv'  { $res.OnlineStatus = 'In Game' }
-        'oGvS' { $res.OnlineStatus = 'Searching for Game' }
-    }
-
-    # --- status (index 7) ---
-    switch ("$($p[7])") {
-        '1' { $res.PlayerStatus = 'Online' }
-        '2' { $res.PlayerStatus = 'Guest Room' }
-        '3' { $res.PlayerStatus = 'Searching Opponents' }
-        '5' { $res.PlayerStatus = 'Joining Game' }
-        '6' { $res.PlayerStatus = 'Hosting Game' }
-    }
-    # ls_stat = 0 のときの In-Game 特例
-    if ("$ls" -eq '0' -and "$($p[7])" -eq '6') {
-        $res.OnlineStatus = 'In-Game (Host)';   $res.NumPlayers = 'Unknown'; $res.GameInfo = 'Unknown'
-        $res.Mode1 = $null; $res.Mode2 = $null
-    }
-    elseif ("$ls" -eq '0' -and "$($p[7])" -eq '2') {
-        $res.OnlineStatus = 'In-Game (Client)'; $res.NumPlayers = 'Unknown'; $res.GameInfo = 'Unknown'
-        $res.Mode1 = $null; $res.Mode2 = $null
-    }
-    return $res
-}
+$bgDark = [System.Drawing.Color]::FromArgb(0x23, 0x23, 0x23)
+$panel  = [System.Drawing.Color]::FromArgb(0x2D, 0x2D, 0x2D)
+$orange = [System.Drawing.Color]::FromArgb(0xE7, 0x65, 0x0C)
+$cream  = [System.Drawing.Color]::FromArgb(0xFF, 0xFF, 0xCA)
+$cyan   = [System.Drawing.Color]::FromArgb(0xA4, 0xE1, 0xFF)
+$green  = [System.Drawing.Color]::FromArgb(0x6A, 0xD0, 0x8A)
+$red    = [System.Drawing.Color]::FromArgb(0xE8, 0x6A, 0x6A)
+$dim    = [System.Drawing.Color]::FromArgb(0xB7, 0xB7, 0xB7)
+$Colors = @{ cream = $cream; dim = $dim; cyan = $cyan; red = $red; orange = $orange; green = $green }
 
 # ============================================================================
-# 起動: ブラウザ
+# GUI
 # ============================================================================
-$browser = Find-Browser
-if (-not $browser) {
-    [System.Windows.Forms.MessageBox]::Show(
-        "Chrome もしくは Chromium 版 Edge が見つかりませんでした。`n" +
-        "wiimmfi.de は Cloudflare 保護のため、ページを描画できるブラウザが必要です。`n" +
-        "Chrome か Edge をインストールしてから再度お試しください。",
-        "MPH Player List", 'OK', 'Error') | Out-Null
-    return
-}
-
-$Port = Get-FreePort
-$Profile = Join-Path $env:TEMP 'mph_playerlist_profile'
-$chromeArgs = @(
-    "--remote-debugging-port=$Port",
-    "--user-data-dir=`"$Profile`"",
-    '--no-first-run', '--no-default-browser-check',
-    '--disable-background-timer-throttling',
-    '--window-size=480,360', '--window-position=-32000,-32000',
-    $Url
-)
-$proc = Start-Process -FilePath $browser -ArgumentList $chromeArgs -PassThru -WindowStyle Minimized
-
-# ============================================================================
-# GUI 構築
-# ============================================================================
-$bgDark   = [System.Drawing.Color]::FromArgb(0x37,0x37,0x37)
-$orange   = [System.Drawing.Color]::FromArgb(0xE7,0x65,0x0C)
-$cream    = [System.Drawing.Color]::FromArgb(0xFF,0xFF,0xCA)
-$white    = [System.Drawing.Color]::White
-
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "MPH Wiimmfi Player List"
-$form.Size = New-Object System.Drawing.Size(660, 500)
+$form.Text = "Wiimmfi - MPH Player List"
+$form.Size = New-Object System.Drawing.Size(560, 600)
+$form.MinimumSize = New-Object System.Drawing.Size(420, 380)
 $form.StartPosition = 'CenterScreen'
 $form.BackColor = $bgDark
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-try {
-    $wifi = Join-Path $ImgDir 'wifi.png'
-    if (Test-Path $wifi) { $form.Icon = [System.Drawing.Icon]::FromHandle((New-Object System.Drawing.Bitmap($wifi)).GetHicon()) }
-} catch {}
 
+$top = New-Object System.Windows.Forms.Panel
+$top.Dock = 'Top'; $top.Height = 46; $top.BackColor = $panel
 $lblTitle = New-Object System.Windows.Forms.Label
-$lblTitle.Text = "Player List"
-$lblTitle.ForeColor = $orange
-$lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 15, [System.Drawing.FontStyle]::Bold)
-$lblTitle.Location = New-Object System.Drawing.Point(14, 10)
-$lblTitle.AutoSize = $true
-$form.Controls.Add($lblTitle)
+$lblTitle.Text = "Wiimmfi"; $lblTitle.ForeColor = $orange
+$lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
+$lblTitle.Location = New-Object System.Drawing.Point(14, 10); $lblTitle.AutoSize = $true
+$top.Controls.Add($lblTitle)
+$flowR = New-Object System.Windows.Forms.FlowLayoutPanel
+$flowR.Dock = 'Right'; $flowR.FlowDirection = 'LeftToRight'; $flowR.WrapContents = $false
+$flowR.AutoSize = $true; $flowR.BackColor = $panel; $flowR.Padding = New-Object System.Windows.Forms.Padding(0, 10, 12, 0)
+$lblInt = New-Object System.Windows.Forms.Label
+$lblInt.Text = "Update every:"; $lblInt.ForeColor = $dim; $lblInt.AutoSize = $true
+$lblInt.Margin = New-Object System.Windows.Forms.Padding(0, 6, 6, 0)
+$cmbInterval = New-Object System.Windows.Forms.ComboBox
+$cmbInterval.DropDownStyle = 'DropDownList'; $cmbInterval.Width = 90
+$cmbInterval.BackColor = $bgDark; $cmbInterval.ForeColor = $cream; $cmbInterval.FlatStyle = 'Flat'
+$intervalMap = [ordered]@{ '15 sec' = 15000; '30 sec' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
+foreach ($k in $intervalMap.Keys) { [void]$cmbInterval.Items.Add($k) }
+$cmbInterval.SelectedItem = '30 sec'
+$flowR.Controls.Add($lblInt); $flowR.Controls.Add($cmbInterval)
+$top.Controls.Add($flowR)
 
-$list = New-Object System.Windows.Forms.ListBox
-$list.Location = New-Object System.Drawing.Point(14, 48)
-$list.Size = New-Object System.Drawing.Size(220, 360)
-$list.BackColor = $bgDark
-$list.ForeColor = $cream
-$list.BorderStyle = 'FixedSingle'
-$list.Font = New-Object System.Drawing.Font("Consolas", 11)
-$form.Controls.Add($list)
+$content = New-Object System.Windows.Forms.Panel
+$content.Dock = 'Fill'; $content.BackColor = $bgDark; $content.Padding = New-Object System.Windows.Forms.Padding(8)
+$head = New-Object System.Windows.Forms.Label
+$head.Dock = 'Top'; $head.Height = 30; $head.ForeColor = $cyan
+$head.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold); $head.TextAlign = 'MiddleLeft'
+$tree = New-Object System.Windows.Forms.TreeView
+$tree.Dock = 'Fill'; $tree.BackColor = $panel; $tree.ForeColor = $cream; $tree.BorderStyle = 'FixedSingle'
+$tree.Font = New-Object System.Drawing.Font("MS Gothic", 10); $tree.HideSelection = $false
+$content.Controls.Add($tree); $content.Controls.Add($head)
 
-# 詳細ラベルを生成するヘルパ
-$detail = @{}
-function Add-Field($form, $key, $caption, $y) {
-    $cap = New-Object System.Windows.Forms.Label
-    $cap.Text = $caption
-    $cap.ForeColor = $orange
-    $cap.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-    $cap.Location = New-Object System.Drawing.Point(250, $y)
-    $cap.AutoSize = $true
-    $form.Controls.Add($cap)
-    $val = New-Object System.Windows.Forms.Label
-    $val.Text = ""
-    $val.ForeColor = $white
-    $val.Font = New-Object System.Drawing.Font("Segoe UI", 11)
-    $val.Location = New-Object System.Drawing.Point(420, $y)
-    $val.Size = New-Object System.Drawing.Size(210, 22)
-    $form.Controls.Add($val)
-    return $val
-}
-$detail.Name        = Add-Field $form 'Name'        "Player Name:"      48
-$detail.Fc          = Add-Field $form 'Fc'          "Friend Code:"      80
-$detail.Online      = Add-Field $form 'Online'      "Online Status:"   112
-$detail.Status      = Add-Field $form 'Status'      "Player Status:"   144
-$detail.Join        = Add-Field $form 'Join'        "Join Players:"    176
-$detail.Game        = Add-Field $form 'Game'        "Game Info:"       208
-$detail.Num         = Add-Field $form 'Num'         "Number of Players:" 240
-
-# モードアイコン
-$picMode1 = New-Object System.Windows.Forms.PictureBox
-$picMode1.Location = New-Object System.Drawing.Point(420, 280)
-$picMode1.Size = New-Object System.Drawing.Size(80, 80)
-$picMode1.SizeMode = 'Zoom'
-$picMode1.BackColor = [System.Drawing.Color]::Transparent
-$form.Controls.Add($picMode1)
-$picMode2 = New-Object System.Windows.Forms.PictureBox
-$picMode2.Location = New-Object System.Drawing.Point(520, 280)
-$picMode2.Size = New-Object System.Drawing.Size(80, 80)
-$picMode2.SizeMode = 'Zoom'
-$picMode2.BackColor = [System.Drawing.Color]::Transparent
-$form.Controls.Add($picMode2)
-
-# Friends / Rivals （アイコン + ラベル）
-$picFriends = New-Object System.Windows.Forms.PictureBox
-$picFriends.Location = New-Object System.Drawing.Point(250, 286); $picFriends.Size = New-Object System.Drawing.Size(24, 24)
-$picFriends.SizeMode = 'Zoom'; $picFriends.BackColor = [System.Drawing.Color]::Transparent
-$picFriends.Visible = $false; $form.Controls.Add($picFriends)
-$lblFriends = New-Object System.Windows.Forms.Label
-$lblFriends.Text = "Friends"; $lblFriends.ForeColor = [System.Drawing.Color]::FromArgb(0x5E,0x5E,0xFF)
-$lblFriends.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-$lblFriends.Location = New-Object System.Drawing.Point(282, 288); $lblFriends.AutoSize = $true
-$lblFriends.Visible = $false; $form.Controls.Add($lblFriends)
-$picRivals = New-Object System.Windows.Forms.PictureBox
-$picRivals.Location = New-Object System.Drawing.Point(250, 318); $picRivals.Size = New-Object System.Drawing.Size(24, 24)
-$picRivals.SizeMode = 'Zoom'; $picRivals.BackColor = [System.Drawing.Color]::Transparent
-$picRivals.Visible = $false; $form.Controls.Add($picRivals)
-$lblRivals = New-Object System.Windows.Forms.Label
-$lblRivals.Text = "Rivals"; $lblRivals.ForeColor = [System.Drawing.Color]::FromArgb(0xFF,0x62,0x62)
-$lblRivals.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-$lblRivals.Location = New-Object System.Drawing.Point(282, 320); $lblRivals.AutoSize = $true
-$lblRivals.Visible = $false; $form.Controls.Add($lblRivals)
-
-# ステータスバー
 $status = New-Object System.Windows.Forms.Label
-$status.Location = New-Object System.Drawing.Point(14, 420)
-$status.Size = New-Object System.Drawing.Size(620, 40)
-$status.ForeColor = [System.Drawing.Color]::FromArgb(0xA4,0xE1,0xFF)
-$status.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$status.Text = "Connecting... (Cloudflare を通過中。初回は数秒〜十数秒かかります)"
-$form.Controls.Add($status)
+$status.Dock = 'Bottom'; $status.Height = 24; $status.ForeColor = $dim
+$status.Font = New-Object System.Drawing.Font("Segoe UI", 9); $status.TextAlign = 'MiddleLeft'
+$status.BackColor = $panel; $status.Padding = New-Object System.Windows.Forms.Padding(8, 0, 0, 0); $status.Text = "Connecting..."
 
-# ----------------------------------------------------------------------------
-# 状態保持 + 画像ロード（キャッシュ）
-# ----------------------------------------------------------------------------
-$script:PlayersDecoded = @()
-$script:ImgCache = @{}
-function Load-Img($name) {
-    if (-not $name) { return $null }
-    if ($script:ImgCache.ContainsKey($name)) { return $script:ImgCache[$name] }
-    $path = Join-Path $ImgDir $name
-    if (Test-Path $path) {
-        try { $img = [System.Drawing.Image]::FromFile($path); $script:ImgCache[$name] = $img; return $img } catch { return $null }
-    }
-    return $null
-}
+$form.Controls.Add($content); $form.Controls.Add($top); $form.Controls.Add($status)
+$content.SendToBack(); $top.BringToFront(); $status.BringToFront()
 
-function Update-Detail {
-    $i = $list.SelectedIndex
-    if ($i -lt 0 -or $i -ge $script:PlayersDecoded.Count) { return }
-    $d = $script:PlayersDecoded[$i]
-    $detail.Name.Text   = $d.Name
-    $detail.Fc.Text     = $d.Fc
-    $detail.Online.Text = $d.OnlineStatus
-    $detail.Status.Text = $d.PlayerStatus
-    $detail.Join.Text   = $d.JoinPlayers
-    $detail.Game.Text   = $d.GameInfo
-    $detail.Num.Text    = $d.NumPlayers
-    $picMode1.Image = Load-Img $d.Mode1
-    $picMode2.Image = Load-Img $d.Mode2
-    if ($d.ShowFriends -and -not $picFriends.Image) { $picFriends.Image = Load-Img 'friends.png' }
-    if ($d.ShowRivals  -and -not $picRivals.Image)  { $picRivals.Image  = Load-Img 'rivals.png' }
-    $picFriends.Visible = $d.ShowFriends
-    $lblFriends.Visible = $d.ShowFriends
-    $picRivals.Visible  = $d.ShowRivals
-    $lblRivals.Visible  = $d.ShowRivals
-}
-$list.Add_SelectedIndexChanged({ Update-Detail })
-
-# ----------------------------------------------------------------------------
-# 描画のみ（取得はバックグラウンド runspace 側。UI スレッドを塞がない）
-#   $Html を解析・デコードし、変化があった部分だけ GUI を更新する。
-# ----------------------------------------------------------------------------
-$script:LastNames = [guid]::NewGuid().ToString()   # 初回は必ず再構築させる番兵
-$script:OnlineCount = 0
-function Render-Players {
-    param([string]$Html)
-    if (-not $Html) { return }
-    $players = Parse-Players -Html $Html   # カンマ返しのため @() は付けない
-    $decoded = @()
-    foreach ($p in $players) { $decoded += (Decode-Player $p) }
-    $script:PlayersDecoded = $decoded
-    $script:OnlineCount = $decoded.Count
-
-    $names = @($decoded | ForEach-Object { $_.Name })
-    $joined = ($names -join "`n")
-    if ($joined -ne $script:LastNames) {           # 顔ぶれが変わった時だけ ListBox を作り直す
-        $script:LastNames = $joined
-        $prev = $list.SelectedItem
-        $list.BeginUpdate()
-        $list.Items.Clear()
-        foreach ($n in $names) { [void]$list.Items.Add($n) }
-        $list.EndUpdate()
-        if ($list.Items.Count -gt 0) {
-            $idx = if ($prev) { $list.Items.IndexOf($prev) } else { -1 }
-            $list.SelectedIndex = [Math]::Max(0, $idx)
-        }
-    }
-    if ($list.Items.Count -gt 0) {
-        Update-Detail                              # 選択中プレイヤーの詳細を最新値で再描画
-    } else {
-        foreach ($k in $detail.Keys) { $detail[$k].Text = "" }
-        $picMode1.Image = $null; $picMode2.Image = $null
-        $picFriends.Visible = $false; $lblFriends.Visible = $false
-        $picRivals.Visible = $false; $lblRivals.Visible = $false
-    }
-}
-
-# ----------------------------------------------------------------------------
-# バックグラウンド取得スレッド（別 runspace）
-#   ネットワーク(CDP)処理を UI スレッドから完全に分離する。結果は同期ハッシュ
-#   テーブル $sync 経由で受け渡し、UI 側は軽量タイマーで拾うだけ。
-# ----------------------------------------------------------------------------
+# ============================================================================
+# バックグラウンドワーカー（Chrome を起動し /text を取得）
+# ============================================================================
 $sync = [hashtable]::Synchronized(@{
-        Port = $Port; Url = $Url; Html = $null; Seq = 0
-        Status = 'starting'; Err = ''; Stop = $false; LastOk = $null
+        WiimmfiLib = $WiimmfiLib; WiimmfiUrl = 'https://wiimmfi.de/stats/game/mprimeds'
+        IntervalMs = 30000; Stop = $false; Json = $null; Seq = 0; Status = 'starting'; Pid = 0
     })
-
-# ワーカー本体（$sync は SessionStateProxy 経由で共有）。Invoke-CdpEval は
-# 既存定義を文字列注入して単一ソースを維持する。
-$workerBody = @'
-$ErrorActionPreference = 'Stop'
-while (-not $sync.Stop) {
-    try {
-        $tabs = Invoke-RestMethod ("http://127.0.0.1:{0}/json" -f $sync.Port) -TimeoutSec 10
-        $tab = $tabs | Where-Object { $_.type -eq 'page' -and $_.url -match 'wiimmfi' } | Select-Object -First 1
-        if ($tab) {
-            $expr = "fetch('" + $sync.Url + "',{cache:'no-store'}).then(function(r){return r.text()})"
-            $html = Invoke-CdpEval -WsUrl $tab.webSocketDebuggerUrl -Expression $expr
-            if ($html -and $html -match 'id="online"' -and $html -notmatch 'Just a moment') {
-                $sync.Html = $html; $sync.Seq = [int]$sync.Seq + 1; $sync.Status = 'ok'; $sync.LastOk = Get-Date
-            } else { $sync.Status = 'connecting' }
-        } else { $sync.Status = 'connecting' }
-    } catch { $sync.Status = 'error'; $sync.Err = $_.Exception.Message }
-    # 接続済みなら 16 秒間隔、未接続なら 1.5 秒間隔で素早く再試行。Stop には即応。
-    $waitMs = if ($sync.Status -eq 'ok') { 16000 } else { 1500 }
-    $slept = 0
-    while ($slept -lt $waitMs -and -not $sync.Stop) { Start-Sleep -Milliseconds 200; $slept += 200 }
+$worker = @'
+. $sync.WiimmfiLib
+$ctx = Start-WiimmfiBrowser -Url $sync.WiimmfiUrl
+if (-not $ctx.ok) {
+    $sync.Json = (@{ ok = $false; error = $ctx.error; online = 0; players = @() } | ConvertTo-Json -Depth 6 -Compress)
+    $sync.Seq = [int]$sync.Seq + 1; $sync.Status = $ctx.error
+    return
 }
+$sync.Pid = $ctx.proc.Id
+try {
+    while (-not $sync.Stop) {
+        $data = Get-WiimmfiData -Port $ctx.port
+        $sync.Json = ($data | ConvertTo-Json -Depth 8 -Compress)
+        $sync.Seq = [int]$sync.Seq + 1
+        $sync.Status = if ($data.ok) { 'ok' } else { 'connecting' }
+        $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
+        $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop) { Start-Sleep -Milliseconds 200; $slept += 200 }
+    }
+} finally { Stop-WiimmfiBrowser -Proc $ctx.proc }
 '@
-$workerScript = "function Invoke-CdpEval {`n$((Get-Command Invoke-CdpEval).Definition)`n}`n" + $workerBody
-
-$bgRunspace = [runspacefactory]::CreateRunspace()
-$bgRunspace.ApartmentState = 'MTA'
-$bgRunspace.ThreadOptions = 'ReuseThread'
-$bgRunspace.Open()
-$bgRunspace.SessionStateProxy.SetVariable('sync', $sync)
-$bgPs = [powershell]::Create()
-$bgPs.Runspace = $bgRunspace
-[void]$bgPs.AddScript($workerScript)
+$rs = [runspacefactory]::CreateRunspace(); $rs.ApartmentState = 'MTA'; $rs.ThreadOptions = 'ReuseThread'; $rs.Open()
+$rs.SessionStateProxy.SetVariable('sync', $sync)
+$bgPs = [powershell]::Create(); $bgPs.Runspace = $rs; [void]$bgPs.AddScript($worker)
 $bgHandle = $bgPs.BeginInvoke()
 
-# ----------------------------------------------------------------------------
-# UI 側: 軽量タイマー（250ms）。新着データ(Seq 変化)のときだけ描画する。
-# ----------------------------------------------------------------------------
+# ============================================================================
+# UI タイマー
+# ============================================================================
+$cmbInterval.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$intervalMap[[string]$cmbInterval.SelectedItem] })
 $script:LastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
-$uiTimer.Interval = 250
+$uiTimer.Interval = 300
 $uiTimer.Add_Tick({
         if ($sync.Seq -ne $script:LastSeq) {
             $script:LastSeq = $sync.Seq
-            Render-Players -Html $sync.Html
-            $status.Text = ("Online: {0} players   /   Last updated {1}   /   source: wiimmfi.de (via {2})" -f $script:OnlineCount, (Get-Date -Format 'HH:mm:ss'), (Split-Path $browser -Leaf))
+            Update-WiimmfiTree -Tree $tree -Head $head -Json $sync.Json -Colors $Colors
         }
-        elseif ($script:LastSeq -lt 0) {
-            if ($sync.Status -eq 'error') { $status.Text = "Retrying...  " + $sync.Err + "  (" + (Get-Date -Format 'HH:mm:ss') + ")" }
-            else { $status.Text = "Connecting... (Cloudflare を通過中。初回は数秒〜十数秒かかります)" }
-        }
+        $status.Text = ("Interval: {0}     status: {1}" -f [string]$cmbInterval.SelectedItem, $sync.Status)
     })
 $form.Add_Shown({ $uiTimer.Start() })
-
-# 終了時: タイマー停止 → ワーカー停止 → 起動した Chrome/Edge を確実に閉じる
 $form.Add_FormClosing({
-        try { $uiTimer.Stop() } catch {}
-        try { $sync.Stop = $true } catch {}
-        try { Start-Sleep -Milliseconds 120 } catch {}
-        try { $bgPs.Stop() } catch {}
-        try { $bgPs.Dispose() } catch {}
-        try { $bgRunspace.Dispose() } catch {}
-        try { if ($proc -and -not $proc.HasExited) { & taskkill /PID $proc.Id /T /F 2>$null | Out-Null } } catch {}
+        try { $uiTimer.Stop() } catch {}; try { $sync.Stop = $true } catch {}; try { Start-Sleep -Milliseconds 200 } catch {}
+        try { $bgPs.Stop(); $bgPs.Dispose(); $rs.Dispose() } catch {}
+        try { if ($sync.Pid -gt 0) { & taskkill /PID $sync.Pid /T /F 2>$null | Out-Null } } catch {}
     })
 
+# ============================================================================
+# 診断モード
+# ============================================================================
 if ($SelfTest) {
-    # --- 診断モード: GUI を表示せず、実際のバックグラウンドワーカー経由で
-    #     取得→解析→描画更新を行い結果をログ出力（並行処理の経路も検証する） ---
-    $log = Join-Path $env:TEMP 'mph_selftest.log'
-    Remove-Item $log -EA SilentlyContinue
+    $log = Join-Path $env:TEMP 'mph_selftest.log'; Remove-Item $log -EA SilentlyContinue
     function L($m) { Add-Content -Path $log -Value $m -Encoding UTF8 }
     try {
-        L "FORM BUILT OK; controls=$($form.Controls.Count)"
-        # バックグラウンドワーカー($bgPs)は既に起動済み。Seq が進む＝取得成功。
-        $deadline = (Get-Date).AddSeconds(45)
-        while ((Get-Date) -lt $deadline -and [int]$sync.Seq -lt 1) { Start-Sleep -Milliseconds 250 }
-        L "Worker Seq=$($sync.Seq)  Status=$($sync.Status)"
-        Render-Players -Html $sync.Html
-        L "ListBox items=$($list.Items.Count)"
-        for ($i = 0; $i -lt $list.Items.Count; $i++) { L ("  item[$i]=" + $list.Items[$i]) }
-        if ($list.Items.Count -gt 0) {
-            $list.SelectedIndex = 0
-            L ("Name=" + $detail.Name.Text + " | Fc=" + $detail.Fc.Text + " | Online=" + $detail.Online.Text + " | Status=" + $detail.Status.Text)
-            L ("Join=" + $detail.Join.Text + " | Game=" + $detail.Game.Text + " | Num=" + $detail.Num.Text)
-            L ("Mode1.Image set=" + ($picMode1.Image -ne $null) + " | Friends.Vis=" + $lblFriends.Visible + " | Rivals.Vis=" + $lblRivals.Visible)
-        }
-        # 2 回目の取得（Seq がさらに進むこと＝定期更新が回ることを確認）
-        $seq1 = [int]$sync.Seq
-        $deadline2 = (Get-Date).AddSeconds(20)
-        while ((Get-Date) -lt $deadline2 -and [int]$sync.Seq -le $seq1) { Start-Sleep -Milliseconds 250 }
-        L ("Second update: Seq " + $seq1 + " -> " + $sync.Seq)
-        L ("Status bar=" + $status.Text)
+        $deadline = (Get-Date).AddSeconds(50)
+        while ((Get-Date) -lt $deadline -and $sync.Status -ne 'ok' -and $sync.Status -ne 'no-browser') { Start-Sleep -Milliseconds 300 }
+        L ("Seq=$($sync.Seq) Status=$($sync.Status)")
+        Update-WiimmfiTree -Tree $tree -Head $head -Json $sync.Json -Colors $Colors
+        L ("head: " + $head.Text); L ("player nodes: " + $tree.Nodes.Count)
+        foreach ($pn in $tree.Nodes) { L ("   " + $pn.Text); foreach ($cn in $pn.Nodes) { L ("      " + $cn.Text) } }
         L "RESULT: SUCCESS"
-    } catch {
-        L ("EXCEPTION: " + $_.Exception.Message); L ($_.ScriptStackTrace)
-    } finally {
-        try { $sync.Stop = $true; Start-Sleep -Milliseconds 150; $bgPs.Stop(); $bgPs.Dispose(); $bgRunspace.Dispose() } catch {}
-        try { if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -EA SilentlyContinue } } catch {}
+    } catch { L ("EXCEPTION: " + $_.Exception.Message); L ($_.ScriptStackTrace) }
+    finally {
+        try { $sync.Stop = $true; Start-Sleep -Milliseconds 200; $bgPs.Stop(); $bgPs.Dispose(); $rs.Dispose() } catch {}
+        try { if ($sync.Pid -gt 0) { Stop-Process -Id $sync.Pid -Force -EA SilentlyContinue } } catch {}
     }
     return
 }
