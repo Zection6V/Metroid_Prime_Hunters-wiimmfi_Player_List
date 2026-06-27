@@ -31,7 +31,9 @@ $WiiLinkLib = Join-Path $ScriptDir 'lib\WiiLinkSource.ps1'
 . $WiiLinkLib
 . (Join-Path $ScriptDir 'lib\TreeRender.ps1')
 . (Join-Path $ScriptDir 'lib\ViewerCommon.ps1')
+. (Join-Path $ScriptDir 'lib\I18n.ps1')
 $theme = Get-MphTheme
+$i18n = Get-MphI18n
 
 # ============================================================================
 # GUI
@@ -43,7 +45,7 @@ $form.MinimumSize = New-Object System.Drawing.Size(760, 460)
 $form.StartPosition = 'CenterScreen'; $form.BackColor = $theme.bgDark
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 
-$bar = New-TopBar -Theme $theme -Title "Metroid Prime Hunters  -  Online Players" -TitleColor $theme.orange -Height 50
+$bar = New-TopBar -Theme $theme -Title "Metroid Prime Hunters" -TitleColor $theme.orange -I18n $i18n -Height 50
 $wm = New-TreePanel -Theme $theme -HeadColor $theme.cyan
 $wl = New-TreePanel -Theme $theme -HeadColor $theme.green
 
@@ -54,7 +56,7 @@ $grid.Dock = 'Fill'; $grid.ColumnCount = 2; $grid.RowCount = 1; $grid.BackColor 
 $grid.Controls.Add($wm.Panel, 0, 0)
 $grid.Controls.Add($wl.Panel, 1, 0)
 
-$status = New-StatusBar -Theme $theme -Text "Starting..."
+$status = New-StatusBar -Theme $theme -Text $i18n.connecting
 
 # Dock の解決順のため Fill(grid) を先に、Top/Bottom を後に追加する（z-order 操作はしない）
 $form.Controls.Add($grid); $form.Controls.Add($bar.Panel); $form.Controls.Add($status)
@@ -65,7 +67,7 @@ $form.Controls.Add($grid); $form.Controls.Add($bar.Panel); $form.Controls.Add($s
 $sync = [hashtable]::Synchronized(@{
         WiimmfiLib = $WiimmfiLib; WiiLinkLib = $WiiLinkLib
         WiimmfiUrl = 'https://wiimmfi.de/stats/game/mprimeds'
-        Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'
+        Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'; Lang = $i18n.lang
         IntervalMs = 30000; Stop = $false; WiimmfiRefresh = $false; WiiLinkRefresh = $false
         WiimmfiJson = $null; WiimmfiSeq = 0; WiimmfiStatus = 'starting'; WiimmfiPid = 0
         WiiLinkJson = $null; WiiLinkSeq = 0; WiiLinkStatus = 'starting'
@@ -82,7 +84,7 @@ if (-not $ctx.ok) {
 $sync.WiimmfiPid = $ctx.proc.Id
 try {
     while (-not $sync.Stop) {
-        $data = Get-WiimmfiData -Port $ctx.port
+        $data = Get-WiimmfiData -Port $ctx.port -Lang $sync.Lang
         $sync.WiimmfiJson = ($data | ConvertTo-Json -Depth 8 -Compress)
         $sync.WiimmfiSeq = [int]$sync.WiimmfiSeq + 1
         $sync.WiimmfiStatus = if ($data.ok) { 'ok' } else { 'connecting' }
@@ -96,7 +98,7 @@ try {
 $wlWorker = @'
 . $sync.WiiLinkLib
 while (-not $sync.Stop) {
-    $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua
+    $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua -Lang $sync.Lang
     $sync.WiiLinkJson = ($data | ConvertTo-Json -Depth 10 -Compress)
     $sync.WiiLinkSeq = [int]$sync.WiiLinkSeq + 1
     $sync.WiiLinkStatus = if ($data.ok) { 'ok' } else { 'error' }
@@ -113,7 +115,7 @@ $wlJob = Start-PollWorker -Sync $sync -Body $wlWorker
 # UI タイマー（描画は lib\TreeRender.ps1 の共有関数に委譲）
 # ============================================================================
 $bar.Combo.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$bar.IntervalMap[[string]$bar.Combo.SelectedItem] })
-$bar.Refresh.Add_Click({ $sync.WiimmfiRefresh = $true; $sync.WiiLinkRefresh = $true; $status.Text = "Refreshing..." })
+$bar.Refresh.Add_Click({ $sync.WiimmfiRefresh = $true; $sync.WiiLinkRefresh = $true; $status.Text = $i18n.refreshing })
 
 $script:WmLastSeq = -1; $script:WlLastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
@@ -121,13 +123,13 @@ $uiTimer.Interval = 300
 $uiTimer.Add_Tick({
         if ($sync.WiimmfiSeq -ne $script:WmLastSeq) {
             $script:WmLastSeq = $sync.WiimmfiSeq
-            Update-WiimmfiTree -Tree $wm.Tree -Head $wm.Head -Json $sync.WiimmfiJson -Colors $theme.Colors
+            Update-WiimmfiTree -Tree $wm.Tree -Head $wm.Head -Json $sync.WiimmfiJson -Colors $theme.Colors -I18n $i18n
         }
         if ($sync.WiiLinkSeq -ne $script:WlLastSeq) {
             $script:WlLastSeq = $sync.WiiLinkSeq
-            Update-WiiLinkTree -Tree $wl.Tree -Head $wl.Head -Json $sync.WiiLinkJson -Colors $theme.Colors
+            Update-WiiLinkTree -Tree $wl.Tree -Head $wl.Head -Json $sync.WiiLinkJson -Colors $theme.Colors -I18n $i18n
         }
-        $status.Text = ("Interval: {0}     Wiimmfi: {1}     WiiLink: {2}" -f [string]$bar.Combo.SelectedItem, $sync.WiimmfiStatus, $sync.WiiLinkStatus)
+        $status.Text = ("{0}: {1}     Wiimmfi: {2}     WiiLink: {3}" -f $i18n.intervalLabel, $bar.Combo.SelectedItem, $sync.WiimmfiStatus, $sync.WiiLinkStatus)
     })
 $form.Add_Shown({ $uiTimer.Start() })
 
@@ -152,8 +154,8 @@ if ($SelfTest) {
         while ((Get-Date) -lt $deadline -and ([int]$sync.WiiLinkSeq -lt 1 -or ($sync.WiimmfiStatus -ne 'ok' -and $sync.WiimmfiStatus -ne 'no-browser'))) { Start-Sleep -Milliseconds 300 }
         L ("WiiLink Seq=$($sync.WiiLinkSeq) Status=$($sync.WiiLinkStatus)")
         L ("Wiimmfi Seq=$($sync.WiimmfiSeq) Status=$($sync.WiimmfiStatus)")
-        Update-WiiLinkTree -Tree $wl.Tree -Head $wl.Head -Json $sync.WiiLinkJson -Colors $theme.Colors
-        Update-WiimmfiTree -Tree $wm.Tree -Head $wm.Head -Json $sync.WiimmfiJson -Colors $theme.Colors
+        Update-WiiLinkTree -Tree $wl.Tree -Head $wl.Head -Json $sync.WiiLinkJson -Colors $theme.Colors -I18n $i18n
+        Update-WiimmfiTree -Tree $wm.Tree -Head $wm.Head -Json $sync.WiimmfiJson -Colors $theme.Colors -I18n $i18n
         L ("WiiLink head: " + $wl.Head.Text)
         L ("WiiLink room nodes: " + $wl.Tree.Nodes.Count)
         foreach ($rn in $wl.Tree.Nodes) { L ("   " + $rn.Text); foreach ($pn in $rn.Nodes) { if ($pn.Tag.Key -like 'wl:*') { L ("      " + $pn.Text) } } }

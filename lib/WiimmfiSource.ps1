@@ -20,14 +20,8 @@ $script:WiimmfiDefaultUrl = 'https://wiimmfi.de/stats/game/mprimeds'
 # 実データ取得に使う軽量 text エンドポイント（'!' 区切りヘッダ + '|' 区切り行）
 $script:WiimmfiTextUrl = 'https://wiimmfi.de/stats/game/mprimeds/text'
 
-# ---- 状態コードの日本語化（Tampermonkey 版 "Wiimfi MPH Stats Translator JP" 準拠） ----
-# ol_stat はフラグ文字列で 1 文字ずつ意味を持つ。大文字小文字を区別する必要があるため
-# （G=グローバル と g=ゲスト, C=ルーム接続中 と c=リージョン）、解読は switch -CaseSensitive で行う。
-# status は数値なので通常のハッシュで対応。
-$script:WiimmfiStatusMap = @{
-    '0' = 'オフライン'; '1' = 'オンライン（待機中）'; '2' = 'ルーム/グローバルのゲスト'
-    '3' = 'グローバル検索中'; '4' = 'プライベートルーム接続中'; '5' = 'ルーム/グローバルのホスト'; '6' = 'ホスト'
-}
+# 言語テーブル（ol_stat / status / mode / join の対訳）は lib\I18n.ps1 に集約
+. (Join-Path $PSScriptRoot 'I18n.ps1')
 
 function Find-Browser {
     $cands = @(
@@ -102,9 +96,10 @@ function Parse-WiimmfiText {
     return , $players
 }
 
-# 状態コードを解読し、表示用の正規化ハッシュテーブルにする（元 AHK の selectPlayer 準拠）
+# 状態コードを解読し、表示用の正規化ハッシュテーブルにする（言語は -Lang / OS 既定）
 function ConvertTo-WiimmfiPlayer {
-    param($p)
+    param($p, [string]$Lang = (Get-MphLang))
+    $i = Get-MphI18n -Lang $Lang
     $res = [ordered]@{
         Name = [string]$p[10]; Fc = [string]$p[2]; OnlineStatus = ''; PlayerStatus = ''
         JoinPlayers = ''; GameInfo = ''; NumPlayers = ''; ShowFriends = $false; ShowRivals = $false
@@ -113,34 +108,21 @@ function ConvertTo-WiimmfiPlayer {
     $v = $ls; while ($v.Length -lt 7) { $v = '0' + $v }; if ($v.Length -lt 8) { $v = '1' + $v }
     $d = $v.ToCharArray()
     switch ("$($d[0])") { '1' { $res.NumPlayers = '1' } '2' { $res.NumPlayers = '2' } '4' { $res.NumPlayers = '3' } '6' { $res.NumPlayers = '4' } }
-    switch ("$($d[1])") {
-        '0' { $res.GameInfo = 'Survival / None' }
-        '1' { $res.GameInfo = 'Battle / Bounty' }
-        '2' { $res.GameInfo = 'Defender / Capture' }
-        '3' { $res.GameInfo = 'Prime Hunter / Nodes' }
-    }
+    if ($i.mode.ContainsKey("$($d[1])")) { $res.GameInfo = $i.mode["$($d[1])"] }
     $rivals = ("$($d[6])" -eq '1'); $friends = ("$($d[7])" -eq '8')
     $res.ShowRivals = $rivals; $res.ShowFriends = $friends
-    if ($rivals -and $friends) { $res.JoinPlayers = 'Friends and Rivals' }
-    elseif ($rivals) { $res.JoinPlayers = 'Rivals Only' }
-    elseif ($friends) { $res.JoinPlayers = 'Friends Only' }
-    # ol_stat（フラグ文字列）を 1 文字ずつ日本語化し ＋ で連結（大文字小文字を区別）
+    if ($rivals -and $friends) { $res.JoinPlayers = $i.joinBoth }
+    elseif ($rivals) { $res.JoinPlayers = $i.joinRivals }
+    elseif ($friends) { $res.JoinPlayers = $i.joinFriends }
+    # ol_stat（フラグ文字列）を 1 文字ずつ訳して ＋ で連結（大文字小文字を区別する olStat マップ）
     $ol = [string]$p[6]
     if ($ol) {
-        $parts = foreach ($ch in $ol.ToCharArray()) {
-            switch -CaseSensitive ([string]$ch) {
-                'o' { 'オンライン' } 'P' { 'プライベートルーム' } 'G' { 'グローバル' } 'c' { 'リージョン' }
-                'w' { 'ワールドワイド' } 'A' { 'アクティブ' } 'R' { 'レース' } 'B' { 'バトル' }
-                'h' { 'ホスト' } 'g' { 'ゲスト' } 'v' { '観戦者' } 'S' { 'グローバル検索中' } 'C' { 'ルーム接続中' }
-                default { [string]$ch }
-            }
-        }
+        $parts = foreach ($ch in $ol.ToCharArray()) { $k = [string]$ch; if ($i.olStat.ContainsKey($k)) { $i.olStat[$k] } else { $k } }
         $res.OnlineStatus = ($parts -join '＋')
     }
-    # status（数値）を日本語化
+    # status（数値）を訳す
     $st = [string]$p[7]
-    if ($script:WiimmfiStatusMap.ContainsKey($st)) { $res.PlayerStatus = $script:WiimmfiStatusMap[$st] }
-    elseif ($st) { $res.PlayerStatus = $st }
+    if ($i.status.ContainsKey($st)) { $res.PlayerStatus = $i.status[$st] } elseif ($st) { $res.PlayerStatus = $st }
     return $res
 }
 
@@ -165,13 +147,13 @@ function Stop-WiimmfiBrowser {
 }
 
 function Get-WiimmfiData {
-    param([int]$Port, [string]$TextUrl = $script:WiimmfiTextUrl)
+    param([int]$Port, [string]$TextUrl = $script:WiimmfiTextUrl, [string]$Lang = (Get-MphLang))
     $res = @{ ok = $false; error = ''; online = 0; players = @() }
     $txt = Get-WiimmfiText -Port $Port -TextUrl $TextUrl
     if ($null -eq $txt) { $res.error = 'connecting'; return $res }   # 未通過（空文字は 0 人の正常応答）
     $players = Parse-WiimmfiText -Text $txt
     $list = @()
-    foreach ($p in $players) { $list += (ConvertTo-WiimmfiPlayer $p) }
+    foreach ($p in $players) { $list += (ConvertTo-WiimmfiPlayer $p -Lang $Lang) }
     $res.players = $list
     $res.online = $list.Count
     $res.ok = $true

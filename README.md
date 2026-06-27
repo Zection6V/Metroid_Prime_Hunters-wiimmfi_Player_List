@@ -8,6 +8,9 @@ extra needs to be installed. Each viewer lets you pick the polling interval
 (15s / 30s / 1m / 2m / 5m, default 30s — gentle on the servers), and has a
 **↻ Refresh** button for an immediate update without waiting for the next poll.
 
+The UI language follows Windows: **Japanese on a Japanese system, English otherwise**
+(override with the `MPH_LANG=ja|en` environment variable).
+
 | Double-click | Shows |
 |---|---|
 | **`Run MPH Unified.bat`** | Both servers side-by-side in one window |
@@ -30,6 +33,7 @@ lib/WiimmfiSource.ps1   data fetch — Wiimmfi (browser/CDP + /text parsing)
 lib/WiiLinkSource.ps1   data fetch — WiiLink (JSON API)
 lib/TreeRender.ps1      presentation — shared TreeView rendering
 lib/ViewerCommon.ps1    UI parts — theme, top bar + interval, tree panel, poll worker
+lib/I18n.ps1            localization — ja/en strings (UI + status-code maps)
 MPH-Unified.ps1         viewer — both servers
 Wiimmfi-PlayerList.ps1  viewer — Wiimmfi only
 WiiLink-PlayerList.ps1  viewer — WiiLink only

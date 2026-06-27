@@ -11,13 +11,17 @@
       - https://api.wfc.wiilink24.com/api/groups
 #>
 
+. (Join-Path $PSScriptRoot 'I18n.ps1')
+
 function Get-WiiLinkData {
     param(
         [string]$StatsUrl  = 'https://api.wfc.wiilink24.com/api/stats',
         [string]$GroupsUrl = 'https://api.wfc.wiilink24.com/api/groups',
         [string]$Game      = 'mprimeds',
-        [string]$Ua        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'
+        [string]$Ua        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList',
+        [string]$Lang      = (Get-MphLang)
     )
+    $i = Get-MphI18n -Lang $Lang
     $result = @{ ok = $false; error = ''; stats = @{ online = 0; active = 0; groups = 0 }; rooms = @() }
     try {
         $h = @{ 'User-Agent' = $Ua }
@@ -36,8 +40,8 @@ function Get-WiiLinkData {
         $all = $groupsJson | ConvertFrom-Json
         $rooms = @()
         foreach ($g in @($all | Where-Object { $_.game -eq $Game })) {
-            $typeLabel = if ($g.type -eq 'private') { 'Friends' } elseif ($g.type -eq 'anybody') { 'Public' } else { [string]$g.type }
-            $joinLabel = if ($g.suspend) { 'Not joinable' } else { 'Joinable' }
+            $typeLabel = if ($g.type -eq 'private') { $i.wlFriends } elseif ($g.type -eq 'anybody') { $i.wlPublic } else { [string]$g.type }
+            $joinLabel = if ($g.suspend) { $i.wlNotJoinable } else { $i.wlJoinable }
             $created = [string]$g.created
             try { $created = ([datetime]$g.created).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss') } catch {}
 
@@ -48,10 +52,10 @@ function Get-WiiLinkData {
                 $isHost = ($pp.Name -eq $hostKey)
                 $players += @{
                     name = [string]$p.name; fc = [string]$p.fc; pid = [string]$p.pid
-                    role = (&{ if ($isHost) { 'Host' } else { 'Member' } }); connFail = [string]$p.conn_fail; isHost = $isHost
+                    role = (&{ if ($isHost) { $i.roleHost } else { $i.roleMember } }); connFail = [string]$p.conn_fail; isHost = $isHost
                 }
             }
-            $hostName = 'Awaiting host'
+            $hostName = $i.awaitingHost
             $hp = @($players | Where-Object { $_.isHost })
             if ($hp.Count -gt 0) { $hostName = $hp[0].name }
 

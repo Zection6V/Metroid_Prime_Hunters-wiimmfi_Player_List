@@ -23,7 +23,9 @@ $WiimmfiLib = Join-Path $ScriptDir 'lib\WiimmfiSource.ps1'
 . $WiimmfiLib
 . (Join-Path $ScriptDir 'lib\TreeRender.ps1')
 . (Join-Path $ScriptDir 'lib\ViewerCommon.ps1')
+. (Join-Path $ScriptDir 'lib\I18n.ps1')
 $theme = Get-MphTheme
+$i18n = Get-MphI18n
 
 # ---- GUI ----
 $form = New-Object System.Windows.Forms.Form
@@ -33,15 +35,15 @@ $form.MinimumSize = New-Object System.Drawing.Size(420, 380)
 $form.StartPosition = 'CenterScreen'; $form.BackColor = $theme.bgDark
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 
-$bar = New-TopBar -Theme $theme -Title "Wiimmfi" -TitleColor $theme.orange
+$bar = New-TopBar -Theme $theme -Title "Wiimmfi" -TitleColor $theme.orange -I18n $i18n
 $pane = New-TreePanel -Theme $theme -HeadColor $theme.cyan
-$status = New-StatusBar -Theme $theme
+$status = New-StatusBar -Theme $theme -Text $i18n.connecting
 # Dock の解決順のため Fill(コンテンツ) を先に、Top/Bottom を後に追加する（z-order 操作はしない）
 $form.Controls.Add($pane.Panel); $form.Controls.Add($bar.Panel); $form.Controls.Add($status)
 
 # ---- ワーカー（Chrome を起動し /text を取得） ----
 $sync = [hashtable]::Synchronized(@{
-        WiimmfiLib = $WiimmfiLib; WiimmfiUrl = 'https://wiimmfi.de/stats/game/mprimeds'
+        WiimmfiLib = $WiimmfiLib; WiimmfiUrl = 'https://wiimmfi.de/stats/game/mprimeds'; Lang = $i18n.lang
         IntervalMs = 30000; Stop = $false; Refresh = $false; Json = $null; Seq = 0; Status = 'starting'; Pid = 0
     })
 $worker = @'
@@ -55,7 +57,7 @@ if (-not $ctx.ok) {
 $sync.Pid = $ctx.proc.Id
 try {
     while (-not $sync.Stop) {
-        $data = Get-WiimmfiData -Port $ctx.port
+        $data = Get-WiimmfiData -Port $ctx.port -Lang $sync.Lang
         $sync.Json = ($data | ConvertTo-Json -Depth 8 -Compress)
         $sync.Seq = [int]$sync.Seq + 1
         $sync.Status = if ($data.ok) { 'ok' } else { 'connecting' }
@@ -69,16 +71,16 @@ $job = Start-PollWorker -Sync $sync -Body $worker
 
 # ---- UI タイマー ----
 $bar.Combo.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$bar.IntervalMap[[string]$bar.Combo.SelectedItem] })
-$bar.Refresh.Add_Click({ $sync.Refresh = $true; $status.Text = "Refreshing..." })
+$bar.Refresh.Add_Click({ $sync.Refresh = $true; $status.Text = $i18n.refreshing })
 $script:LastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 300
 $uiTimer.Add_Tick({
         if ($sync.Seq -ne $script:LastSeq) {
             $script:LastSeq = $sync.Seq
-            Update-WiimmfiTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors
+            Update-WiimmfiTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors -I18n $i18n
         }
-        $status.Text = ("Interval: {0}     status: {1}" -f [string]$bar.Combo.SelectedItem, $sync.Status)
+        $status.Text = ("{0}: {1}     {2}: {3}" -f $i18n.intervalLabel, $bar.Combo.SelectedItem, $i18n.statusLabel, $sync.Status)
     })
 $form.Add_Shown({ $uiTimer.Start() })
 $form.Add_FormClosing({
@@ -95,7 +97,7 @@ if ($SelfTest) {
         $deadline = (Get-Date).AddSeconds(50)
         while ((Get-Date) -lt $deadline -and $sync.Status -ne 'ok' -and $sync.Status -ne 'no-browser') { Start-Sleep -Milliseconds 300 }
         L ("Seq=$($sync.Seq) Status=$($sync.Status)")
-        Update-WiimmfiTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors
+        Update-WiimmfiTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors -I18n $i18n
         L ("head: " + $pane.Head.Text); L ("player nodes: " + $pane.Tree.Nodes.Count)
         foreach ($pn in $pane.Tree.Nodes) { L ("   " + $pn.Text); foreach ($cn in $pn.Nodes) { L ("      " + $cn.Text) } }
         L "RESULT: SUCCESS"

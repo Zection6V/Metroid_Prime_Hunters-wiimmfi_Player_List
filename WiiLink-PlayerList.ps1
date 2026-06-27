@@ -22,7 +22,9 @@ $WiiLinkLib = Join-Path $ScriptDir 'lib\WiiLinkSource.ps1'
 . $WiiLinkLib
 . (Join-Path $ScriptDir 'lib\TreeRender.ps1')
 . (Join-Path $ScriptDir 'lib\ViewerCommon.ps1')
+. (Join-Path $ScriptDir 'lib\I18n.ps1')
 $theme = Get-MphTheme
+$i18n = Get-MphI18n
 
 # ---- GUI ----
 $form = New-Object System.Windows.Forms.Form
@@ -32,21 +34,21 @@ $form.MinimumSize = New-Object System.Drawing.Size(420, 380)
 $form.StartPosition = 'CenterScreen'; $form.BackColor = $theme.bgDark
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 
-$bar = New-TopBar -Theme $theme -Title "WiiLink WFC" -TitleColor $theme.green
+$bar = New-TopBar -Theme $theme -Title "WiiLink WFC" -TitleColor $theme.green -I18n $i18n
 $pane = New-TreePanel -Theme $theme -HeadColor $theme.green
-$status = New-StatusBar -Theme $theme
+$status = New-StatusBar -Theme $theme -Text $i18n.connecting
 # Dock の解決順のため Fill(コンテンツ) を先に、Top/Bottom を後に追加する（z-order 操作はしない）
 $form.Controls.Add($pane.Panel); $form.Controls.Add($bar.Panel); $form.Controls.Add($status)
 
 # ---- ワーカー ----
 $sync = [hashtable]::Synchronized(@{
-        WiiLinkLib = $WiiLinkLib; Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'
+        WiiLinkLib = $WiiLinkLib; Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'; Lang = $i18n.lang
         IntervalMs = 30000; Stop = $false; Refresh = $false; Json = $null; Seq = 0; Status = 'starting'
     })
 $worker = @'
 . $sync.WiiLinkLib
 while (-not $sync.Stop) {
-    $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua
+    $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua -Lang $sync.Lang
     $sync.Json = ($data | ConvertTo-Json -Depth 10 -Compress)
     $sync.Seq = [int]$sync.Seq + 1
     $sync.Status = if ($data.ok) { 'ok' } else { 'error' }
@@ -59,16 +61,16 @@ $job = Start-PollWorker -Sync $sync -Body $worker
 
 # ---- UI タイマー ----
 $bar.Combo.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$bar.IntervalMap[[string]$bar.Combo.SelectedItem] })
-$bar.Refresh.Add_Click({ $sync.Refresh = $true; $status.Text = "Refreshing..." })
+$bar.Refresh.Add_Click({ $sync.Refresh = $true; $status.Text = $i18n.refreshing })
 $script:LastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 300
 $uiTimer.Add_Tick({
         if ($sync.Seq -ne $script:LastSeq) {
             $script:LastSeq = $sync.Seq
-            Update-WiiLinkTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors
+            Update-WiiLinkTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors -I18n $i18n
         }
-        $status.Text = ("Interval: {0}     status: {1}" -f [string]$bar.Combo.SelectedItem, $sync.Status)
+        $status.Text = ("{0}: {1}     {2}: {3}" -f $i18n.intervalLabel, $bar.Combo.SelectedItem, $i18n.statusLabel, $sync.Status)
     })
 $form.Add_Shown({ $uiTimer.Start() })
 $form.Add_FormClosing({
@@ -84,7 +86,7 @@ if ($SelfTest) {
         $deadline = (Get-Date).AddSeconds(30)
         while ((Get-Date) -lt $deadline -and [int]$sync.Seq -lt 1) { Start-Sleep -Milliseconds 250 }
         L ("Seq=$($sync.Seq) Status=$($sync.Status)")
-        Update-WiiLinkTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors
+        Update-WiiLinkTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors -I18n $i18n
         L ("head: " + $pane.Head.Text); L ("room nodes: " + $pane.Tree.Nodes.Count)
         foreach ($rn in $pane.Tree.Nodes) { L ("   " + $rn.Text); foreach ($pn in $rn.Nodes) { if ($pn.Tag.Key -like 'wl:*') { L ("      " + $pn.Text) } } }
         L "RESULT: SUCCESS"

@@ -15,6 +15,8 @@
       Stop-PollWorker  -Job                          … ワーカーの停止・破棄
 #>
 
+. (Join-Path $PSScriptRoot 'I18n.ps1')
+
 function Get-MphTheme {
     $t = @{}
     $t.bgDark = [System.Drawing.Color]::FromArgb(0x23, 0x23, 0x23)
@@ -31,7 +33,8 @@ function Get-MphTheme {
 }
 
 function New-TopBar {
-    param($Theme, [string]$Title, $TitleColor, [int]$Height = 48)
+    param($Theme, [string]$Title, $TitleColor, $I18n, [int]$Height = 48)
+    if (-not $I18n) { $I18n = Get-MphI18n }
     $pad = [int](($Height - 26) / 2)
     $top = New-Object System.Windows.Forms.Panel
     $top.Dock = 'Top'; $top.Height = $Height; $top.BackColor = $Theme.panel
@@ -46,17 +49,17 @@ function New-TopBar {
     $flow.Dock = 'Right'; $flow.FlowDirection = 'LeftToRight'; $flow.WrapContents = $false
     $flow.AutoSize = $true; $flow.BackColor = $Theme.panel; $flow.Padding = New-Object System.Windows.Forms.Padding(0, $pad, 12, 0)
     $cap = New-Object System.Windows.Forms.Label
-    $cap.Text = "Update every:"; $cap.ForeColor = $Theme.dim; $cap.AutoSize = $true
+    $cap.Text = $I18n.updateEvery; $cap.ForeColor = $Theme.dim; $cap.AutoSize = $true
     $cap.Margin = New-Object System.Windows.Forms.Padding(0, 6, 6, 0)
     $cmb = New-Object System.Windows.Forms.ComboBox
     $cmb.DropDownStyle = 'DropDownList'; $cmb.Width = 90
     $cmb.BackColor = $Theme.bgDark; $cmb.ForeColor = $Theme.cream; $cmb.FlatStyle = 'Flat'
-    $map = [ordered]@{ '15 sec' = 15000; '30 sec' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
+    $map = $I18n.intervals
     foreach ($k in $map.Keys) { [void]$cmb.Items.Add($k) }
-    $cmb.SelectedItem = '30 sec'
+    $cmb.SelectedItem = ($map.Keys | Where-Object { $map[$_] -eq 30000 } | Select-Object -First 1)
 
     $btn = New-Object System.Windows.Forms.Button
-    $btn.Text = "↻ Refresh"; $btn.AutoSize = $true; $btn.FlatStyle = 'Flat'
+    $btn.Text = $I18n.refresh; $btn.AutoSize = $true; $btn.FlatStyle = 'Flat'
     $btn.BackColor = $Theme.bgDark; $btn.ForeColor = $Theme.cream
     $btn.FlatAppearance.BorderColor = $Theme.dim
     $btn.Margin = New-Object System.Windows.Forms.Padding(0, 2, 14, 0)
