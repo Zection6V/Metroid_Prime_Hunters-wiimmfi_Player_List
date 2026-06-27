@@ -88,29 +88,35 @@
 ### フィールド 7（ol_stat / オンライン状態フラグ文字列）
 
 ol_stat は **1 文字ずつ意味を持つフラグ列**（例 `oGvS` = 4 つの状態の合成）。
-PowerShell 版（`WiimmfiSource.ps1` の `ConvertTo-WiimmfiPlayer`）は、Tampermonkey 版
-"Wiimfi MPH Stats Translator JP" を参考に各文字を**日本語化して ＋ で連結**する。
-大文字小文字を区別する（`G`=グローバル と `g`=ゲスト、`C`=ルーム接続中 と `c`=リージョン）
-ため `switch -CaseSensitive` を使う。
+`ConvertTo-WiimmfiPlayer` は Tampermonkey 版 "Wiimfi MPH Stats Translator JP" を参考に、
+各文字を訳して ＋ で連結する。対訳は `lib/I18n.ps1` の `olStat`（**Ordinal 比較の
+case-sensitive ハッシュ**）で、`G`=グローバル/Global と `g`=ゲスト/Guest、`C`=ルーム接続中
+と `c`=リージョン を区別する。
 
-| 文字 | 意味 | 文字 | 意味 |
+| 文字 | 日本語 / English | 文字 | 日本語 / English |
 |---|---|---|---|
-| `o` | オンライン | `g` | ゲスト |
-| `P` | プライベートルーム | `v` | 観戦者 |
-| `G` | グローバル | `S` | グローバル検索中 |
-| `c` | リージョン | `C` | ルーム接続中 |
-| `w` | ワールドワイド | `A` | アクティブ |
-| `h` | ホスト | `R` / `B` | レース / バトル |
+| `o` | オンライン / Online | `g` | ゲスト / Guest |
+| `P` | プライベートルーム / Private Room | `v` | 観戦者 / Spectator |
+| `G` | グローバル / Global | `S` | グローバル検索中 / Searching |
+| `c` | リージョン / Region | `C` | ルーム接続中 / Connecting |
+| `w` | ワールドワイド / Worldwide | `A` | アクティブ / Active |
+| `h` | ホスト / Host | `R` / `B` | レース・バトル / Race・Battle |
 
-例: `oGvS` → 「オンライン＋グローバル＋観戦者＋グローバル検索中」
+例（ja）: `oGvS` → 「オンライン＋グローバル＋観戦者＋グローバル検索中」
 
 ### フィールド 8（status / プレイヤー状態コード）
 
-数値を日本語化（`$script:WiimmfiStatusMap`）:
+数値を訳す（`I18n` の `status` マップ）:
 
-- `0` = オフライン / `1` = オンライン（待機中）/ `2` = ルーム/グローバルのゲスト
-- `3` = グローバル検索中 / `4` = プライベートルーム接続中
-- `5` = ルーム/グローバルのホスト / `6` = ホスト
+| 値 | 日本語 / English |
+|---|---|
+| `0` | オフライン / Offline |
+| `1` | オンライン（待機中）/ Online (idle) |
+| `2` | ルーム/グローバルのゲスト / Guest (Room/Global) |
+| `3` | グローバル検索中 / Searching (Global) |
+| `4` | プライベートルーム接続中 / Connecting (Private Room) |
+| `5` | ルーム/グローバルのホスト / Host (Room/Global) |
+| `6` | ホスト / Host |
 
 > 旧 AHK 版は英語かつ `ls_stat=0` の In-Game 特例を持っていたが、char 単位の ol_stat
 > デコードで状態が十分表現できるため、PowerShell 版では特例を廃し上記マップに統一した。
