@@ -23,7 +23,7 @@ Assert-True ($store.Queue.Count -eq 1) 'Write-MphLog must write the first entry 
 Assert-True ((Receive-MphLogEntries -Store $store) -eq 1) 'Receive-MphLogEntries must drain into an empty history.'
 Assert-True ($store.Queue.Count -eq 0) 'Queue must be empty after draining.'
 Assert-True ($store.Entries.Count -eq 1) 'History must contain the drained first entry.'
-Assert-True ($store.Entries[0].message -eq 'first-entry') 'The first log message must be preserved.'
+Assert-True ([string]$store.Entries[0].message -eq 'first-entry') 'The first log message must be preserved.'
 
 Write-Host '== Source emitter regression test =='
 $wiimmfiQueue = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
@@ -34,8 +34,8 @@ Write-WiimmfiDiagnostic -LogQueue $wiimmfiQueue -Level INFO -Stage 'TEST' -Messa
 Write-WiiLinkDiagnostic -LogQueue $wiiLinkQueue -Level INFO -Stage 'TEST' -Message 'wiilink-first'
 Assert-True ($wiimmfiQueue.Count -eq 1) 'Wiimmfi must emit its first event into an empty Queue.'
 Assert-True ($wiiLinkQueue.Count -eq 1) 'WiiLink must emit its first event into an empty Queue.'
-Assert-True ([string]$wiimmfiQueue.Peek().source -eq 'Wiimmfi') 'Wiimmfi event source must be normalized.'
-Assert-True ([string]$wiiLinkQueue.Peek().source -eq 'WiiLink') 'WiiLink event source must be normalized.'
+Assert-True (([string]$wiimmfiQueue.Peek().source -eq 'Wiimmfi')) 'Wiimmfi event source must be normalized.'
+Assert-True (([string]$wiiLinkQueue.Peek().source -eq 'WiiLink')) 'WiiLink event source must be normalized.'
 
 Write-Host '== Null dependency behavior =='
 Write-MphLog -Store $null -Message 'ignored'
