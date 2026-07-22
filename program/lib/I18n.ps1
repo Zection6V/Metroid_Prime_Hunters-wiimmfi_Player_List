@@ -40,6 +40,7 @@ function Get-MphI18n {
                 roomFmt = '{0} の部屋'; awaitingHost = 'ホスト待ち'; roleHost = 'ホスト'; roleMember = 'メンバー'
                 diagnosticLog = '診断ログ'; logExpand = 'ログ ▼'; logCollapse = 'ログ ▲'; logCopy = 'コピー'; logClear = '消去'
                 logAutoScroll = '自動スクロール'; logDetails = '詳細'; logCopied = '診断ログをクリップボードへコピーしました'
+                logSource = '表示:'; logAll = 'すべて'; logWiimmfi = 'Wiimmfi'; logWiiLink = 'WiiLink'; logApp = 'アプリ'
                 wlTransport = 'WiiLink取得:'; wlDirect = '直接API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink取得方式を {0} に変更しました'
                 intervals = [ordered]@{ '15秒' = 15000; '30秒' = 30000; '1分' = 60000; '2分' = 120000; '5分' = 300000 }
                 status = @{ '0' = 'オフライン'; '1' = 'オンライン（待機中）'; '2' = 'ルーム/グローバルのゲスト'; '3' = 'グローバル検索中'; '4' = 'プライベートルーム接続中'; '5' = 'ルーム/グローバルのホスト'; '6' = 'ホスト' }
@@ -61,6 +62,7 @@ function Get-MphI18n {
                 roomFmt = 'Raum von {0}'; awaitingHost = 'Warten auf Host'; roleHost = 'Host'; roleMember = 'Mitglied'
                 diagnosticLog = 'Diagnoseprotokoll'; logExpand = 'Protokoll ▼'; logCollapse = 'Protokoll ▲'; logCopy = 'Kopieren'; logClear = 'Löschen'
                 logAutoScroll = 'Automatisch scrollen'; logDetails = 'Details'; logCopied = 'Diagnoseprotokoll wurde in die Zwischenablage kopiert'
+                logSource = 'Quelle:'; logAll = 'Alle'; logWiimmfi = 'Wiimmfi'; logWiiLink = 'WiiLink'; logApp = 'Anwendung'
                 wlTransport = 'WiiLink über:'; wlDirect = 'Direkte API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink-Abrufmethode wurde auf {0} geändert'
                 intervals = [ordered]@{ '15 Sek.' = 15000; '30 Sek.' = 30000; '1 Min.' = 60000; '2 Min.' = 120000; '5 Min.' = 300000 }
                 status = @{ '0' = 'Offline'; '1' = 'Online (wartend)'; '2' = 'Gast (Raum/Global)'; '3' = 'Globale Suche'; '4' = 'Verbindung mit privatem Raum'; '5' = 'Host (Raum/Global)'; '6' = 'Host' }
@@ -82,6 +84,7 @@ function Get-MphI18n {
                 roomFmt = 'Salle de {0}'; awaitingHost = "En attente de l'hôte"; roleHost = 'Hôte'; roleMember = 'Membre'
                 diagnosticLog = 'Journal de diagnostic'; logExpand = 'Journal ▼'; logCollapse = 'Journal ▲'; logCopy = 'Copier'; logClear = 'Effacer'
                 logAutoScroll = 'Défilement automatique'; logDetails = 'Détails'; logCopied = 'Journal de diagnostic copié dans le presse-papiers'
+                logSource = 'Source :'; logAll = 'Tous'; logWiimmfi = 'Wiimmfi'; logWiiLink = 'WiiLink'; logApp = 'Application'
                 wlTransport = 'WiiLink via :'; wlDirect = 'API directe'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Méthode de récupération WiiLink changée en {0}'
                 intervals = [ordered]@{ '15 s' = 15000; '30 s' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
                 status = @{ '0' = 'Hors ligne'; '1' = 'En ligne (en attente)'; '2' = 'Invité (Salle/Global)'; '3' = 'Recherche globale'; '4' = 'Connexion à une salle privée'; '5' = 'Hôte (Salle/Global)'; '6' = 'Hôte' }
@@ -103,6 +106,7 @@ function Get-MphI18n {
                 roomFmt = 'Stanza di {0}'; awaitingHost = "In attesa dell'host"; roleHost = 'Host'; roleMember = 'Membro'
                 diagnosticLog = 'Registro diagnostico'; logExpand = 'Registro ▼'; logCollapse = 'Registro ▲'; logCopy = 'Copia'; logClear = 'Cancella'
                 logAutoScroll = 'Scorrimento automatico'; logDetails = 'Dettagli'; logCopied = 'Registro diagnostico copiato negli appunti'
+                logSource = 'Origine:'; logAll = 'Tutti'; logWiimmfi = 'Wiimmfi'; logWiiLink = 'WiiLink'; logApp = 'Applicazione'
                 wlTransport = 'WiiLink tramite:'; wlDirect = 'API diretta'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Metodo di acquisizione WiiLink cambiato in {0}'
                 intervals = [ordered]@{ '15 sec' = 15000; '30 sec' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
                 status = @{ '0' = 'Offline'; '1' = 'Online (in attesa)'; '2' = 'Ospite (Stanza/Globale)'; '3' = 'Ricerca globale'; '4' = 'Connessione a stanza privata'; '5' = 'Host (Stanza/Globale)'; '6' = 'Host' }
@@ -124,6 +128,7 @@ function Get-MphI18n {
                 roomFmt = 'Sala de {0}'; awaitingHost = 'Esperando al anfitrión'; roleHost = 'Anfitrión'; roleMember = 'Miembro'
                 diagnosticLog = 'Registro de diagnóstico'; logExpand = 'Registro ▼'; logCollapse = 'Registro ▲'; logCopy = 'Copiar'; logClear = 'Borrar'
                 logAutoScroll = 'Desplazamiento automático'; logDetails = 'Detalles'; logCopied = 'Registro de diagnóstico copiado al portapapeles'
+                logSource = 'Origen:'; logAll = 'Todos'; logWiimmfi = 'Wiimmfi'; logWiiLink = 'WiiLink'; logApp = 'Aplicación'
                 wlTransport = 'WiiLink mediante:'; wlDirect = 'API directa'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Método de obtención de WiiLink cambiado a {0}'
                 intervals = [ordered]@{ '15 s' = 15000; '30 s' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
                 status = @{ '0' = 'Sin conexión'; '1' = 'En línea (en espera)'; '2' = 'Invitado (Sala/Global)'; '3' = 'Búsqueda global'; '4' = 'Conectando a sala privada'; '5' = 'Anfitrión (Sala/Global)'; '6' = 'Anfitrión' }
@@ -145,6 +150,7 @@ function Get-MphI18n {
                 roomFmt = "{0}'s room"; awaitingHost = 'Awaiting host'; roleHost = 'Host'; roleMember = 'Member'
                 diagnosticLog = 'Diagnostic log'; logExpand = 'Log ▼'; logCollapse = 'Log ▲'; logCopy = 'Copy'; logClear = 'Clear'
                 logAutoScroll = 'Auto-scroll'; logDetails = 'Details'; logCopied = 'Diagnostic log copied to clipboard'
+                logSource = 'Source:'; logAll = 'All'; logWiimmfi = 'Wiimmfi'; logWiiLink = 'WiiLink'; logApp = 'Application'
                 wlTransport = 'WiiLink via:'; wlDirect = 'Direct API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink transport changed to {0}'
                 intervals = [ordered]@{ '15 sec' = 15000; '30 sec' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
                 status = @{ '0' = 'Offline'; '1' = 'Online (idle)'; '2' = 'Guest (Room/Global)'; '3' = 'Searching (Global)'; '4' = 'Connecting (Private Room)'; '5' = 'Host (Room/Global)'; '6' = 'Host' }
