@@ -1,8 +1,5 @@
 ﻿<#
-    ViewerCommon.ps1 — ビューワ共通の UI 部品とワーカー基盤（単一責務で再利用）
-
-    dot-source して使う:  . "$PSScriptRoot\lib\ViewerCommon.ps1"
-    前提: 呼び出し側が事前に Add-Type で System.Windows.Forms / System.Drawing を読み込み済み。
+    ViewerCommon.ps1 — ビューワ共通の UI 部品とワーカー基盤
 #>
 
 . (Join-Path $PSScriptRoot 'I18n.ps1')
@@ -56,7 +53,24 @@ function New-TopBar {
 
     $flow.Controls.Add($btn); $flow.Controls.Add($cap); $flow.Controls.Add($cmb)
     $top.Controls.Add($flow)
-    return @{ Panel = $top; Combo = $cmb; IntervalMap = $map; Refresh = $btn }
+    return @{ Panel = $top; Flow = $flow; Combo = $cmb; IntervalMap = $map; Refresh = $btn }
+}
+
+function New-WiiLinkTransportSelector {
+    param($Theme, $I18n, $Flow)
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $I18n.wlTransport; $label.ForeColor = $Theme.dim; $label.AutoSize = $true
+    $label.Margin = New-Object System.Windows.Forms.Padding(8, 6, 5, 0)
+
+    $combo = New-Object System.Windows.Forms.ComboBox
+    $combo.DropDownStyle = 'DropDownList'; $combo.Width = 112
+    $combo.BackColor = $Theme.bgDark; $combo.ForeColor = $Theme.cream; $combo.FlatStyle = 'Flat'
+    [void]$combo.Items.Add($I18n.wlDirect)
+    [void]$combo.Items.Add($I18n.wlBrowser)
+    $combo.SelectedIndex = 0
+
+    if ($Flow) { $Flow.Controls.Add($label); $Flow.Controls.Add($combo) }
+    return @{ Label = $label; Combo = $combo; DirectText = $I18n.wlDirect; BrowserText = $I18n.wlBrowser }
 }
 
 function New-TreePanel {
@@ -86,42 +100,33 @@ function New-StatusBar {
 function New-DiagnosticLogPanel {
     param($Theme, $I18n, [int]$ExpandedHeight = 230)
     if (-not $I18n) { $I18n = Get-MphI18n }
-
     $outer = New-Object System.Windows.Forms.Panel
     $outer.Dock = 'Bottom'; $outer.Height = 30; $outer.BackColor = $Theme.panel
-
     $toolbar = New-Object System.Windows.Forms.FlowLayoutPanel
     $toolbar.Dock = 'Top'; $toolbar.Height = 30; $toolbar.FlowDirection = 'LeftToRight'; $toolbar.WrapContents = $false
     $toolbar.BackColor = $Theme.panel; $toolbar.Padding = New-Object System.Windows.Forms.Padding(6, 2, 4, 0)
-
     $toggle = New-Object System.Windows.Forms.Button
     $toggle.Text = $I18n.logExpand; $toggle.AutoSize = $true; $toggle.FlatStyle = 'Flat'
     $toggle.BackColor = $Theme.bgDark; $toggle.ForeColor = $Theme.cream; $toggle.FlatAppearance.BorderColor = $Theme.dim
-
     $title = New-Object System.Windows.Forms.Label
     $title.Text = $I18n.diagnosticLog; $title.AutoSize = $true; $title.ForeColor = $Theme.green
     $title.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
     $title.Margin = New-Object System.Windows.Forms.Padding(8, 6, 10, 0)
-
     $copy = New-Object System.Windows.Forms.Button
     $copy.Text = $I18n.logCopy; $copy.AutoSize = $true; $copy.FlatStyle = 'Flat'; $copy.BackColor = $Theme.bgDark; $copy.ForeColor = $Theme.cream
     $clear = New-Object System.Windows.Forms.Button
     $clear.Text = $I18n.logClear; $clear.AutoSize = $true; $clear.FlatStyle = 'Flat'; $clear.BackColor = $Theme.bgDark; $clear.ForeColor = $Theme.cream
-
     $auto = New-Object System.Windows.Forms.CheckBox
     $auto.Text = $I18n.logAutoScroll; $auto.Checked = $true; $auto.AutoSize = $true; $auto.ForeColor = $Theme.dim
     $auto.Margin = New-Object System.Windows.Forms.Padding(10, 6, 0, 0)
     $details = New-Object System.Windows.Forms.CheckBox
     $details.Text = $I18n.logDetails; $details.Checked = $false; $details.AutoSize = $true; $details.ForeColor = $Theme.dim
     $details.Margin = New-Object System.Windows.Forms.Padding(10, 6, 0, 0)
-
     $toolbar.Controls.Add($toggle); $toolbar.Controls.Add($title); $toolbar.Controls.Add($copy); $toolbar.Controls.Add($clear); $toolbar.Controls.Add($auto); $toolbar.Controls.Add($details)
-
     $box = New-Object System.Windows.Forms.RichTextBox
     $box.Dock = 'Fill'; $box.ReadOnly = $true; $box.BackColor = $Theme.bgDark; $box.ForeColor = $Theme.cream
     $box.BorderStyle = 'FixedSingle'; $box.Font = New-Object System.Drawing.Font("Consolas", 9)
     $box.WordWrap = $false; $box.DetectUrls = $false; $box.HideSelection = $false; $box.Visible = $false
-
     $outer.Controls.Add($box); $outer.Controls.Add($toolbar)
     return @{ Panel = $outer; Toolbar = $toolbar; LogBox = $box; Toggle = $toggle; Copy = $copy; Clear = $clear; AutoScroll = $auto; Details = $details; ExpandedHeight = $ExpandedHeight; Expanded = $false }
 }
@@ -146,7 +151,6 @@ function Add-DiagnosticLog {
     $color = switch ($level) { 'ERROR' { $Theme.red } 'WARN' { $Theme.orange } 'DEBUG' { $Theme.dim } default { $Theme.cream } }
     $box = $LogPanel.LogBox
     $box.SelectionStart = $box.TextLength; $box.SelectionLength = 0; $box.SelectionColor = $color; $box.AppendText($line); $box.SelectionColor = $box.ForeColor
-
     $lines = $box.Lines
     if ($lines.Count -gt $MaxLines) {
         $keep = $lines | Select-Object -Last ($MaxLines - 200)
