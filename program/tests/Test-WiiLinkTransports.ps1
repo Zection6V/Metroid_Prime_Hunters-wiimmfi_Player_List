@@ -21,8 +21,12 @@ Get-ChildItem -Path $programDir -Recurse -Filter '*.ps1' | ForEach-Object {
 if ($parseFailures.Count -gt 0) { throw ($parseFailures -join [Environment]::NewLine) }
 Write-Host 'All PowerShell files parsed successfully.'
 
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 . (Join-Path $programDir 'lib\WiiLinkSource.ps1')
 . (Join-Path $programDir 'lib\LogStore.ps1')
+. (Join-Path $programDir 'lib\ViewerCommon.ps1')
+. (Join-Path $programDir 'lib\DiagnosticLogView.ps1')
 
 Write-Host '== GUI localization validation =='
 $supportedLanguages = @('ja', 'en', 'de', 'fr', 'it', 'es')
@@ -81,6 +85,9 @@ Assert-True ($wiiLinkSourceText -match "ValidateSet\('direct',\s*'browser'\)") '
 Assert-True ($unifiedText -match "New-MphLogStore -Source 'Wiimmfi'") 'Unified viewer must create a Wiimmfi log store.'
 Assert-True ($unifiedText -match "New-MphLogStore -Source 'WiiLink'") 'Unified viewer must create a WiiLink log store.'
 Assert-True ($unifiedText -match "New-MphLogStore -Source 'App'") 'Unified viewer must create an application log store.'
+Assert-True ($unifiedText -match 'WiimmfiLogQueue') 'Unified viewer must inject the Wiimmfi queue independently.'
+Assert-True ($unifiedText -match 'WiiLinkLogQueue') 'Unified viewer must inject the WiiLink queue independently.'
+Assert-True ($unifiedText -notmatch '\$sync\.LogQueue') 'Unified viewer must not retain a shared worker log queue.'
 Assert-True ($unifiedText -match "Key = 'All'") 'Unified viewer must expose the combined log view.'
 Assert-True ($unifiedText -match "Key = 'Wiimmfi'") 'Unified viewer must expose the Wiimmfi-only log view.'
 Assert-True ($unifiedText -match "Key = 'WiiLink'") 'Unified viewer must expose the WiiLink-only log view.'
@@ -111,11 +118,43 @@ Assert-True ($wiiLinkOnly.Count -eq 1 -and $wiiLinkOnly[0].message -eq 'wl-debug
 Assert-True ($withDebug[0].message -eq 'wm-info' -and $withDebug[2].message -eq 'app-warn') 'Combined log view must be chronological.'
 
 Clear-MphLogStores -Stores $stores -Source 'Wiimmfi'
-Assert-True (@(Get-MphLogEntries -Stores $stores -Source 'Wiimmfi' -IncludeDebug).Count -eq 0) 'Source-specific clear must clear only Wiimmfi.'
-Assert-True (@(Get-MphLogEntries -Stores $stores -Source 'WiiLink' -IncludeDebug).Count -eq 1) 'Source-specific clear must preserve WiiLink.'
+$afterWiimmfiClear = @(Get-MphLogEntries -Stores $stores -Source 'Wiimmfi' -IncludeDebug)
+$wiiLinkAfterWiimmfiClear = @(Get-MphLogEntries -Stores $stores -Source 'WiiLink' -IncludeDebug)
+Assert-True ($afterWiimmfiClear.Count -eq 0) 'Source-specific clear must clear only Wiimmfi.'
+Assert-True ($wiiLinkAfterWiimmfiClear.Count -eq 1) 'Source-specific clear must preserve WiiLink.'
 Clear-MphLogStores -Stores $stores -Source 'All'
-Assert-True (@(Get-MphLogEntries -Stores $stores -Source 'All' -IncludeDebug).Count -eq 0) 'All clear must clear every store.'
+$afterAllClear = @(Get-MphLogEntries -Stores $stores -Source 'All' -IncludeDebug)
+Assert-True ($afterAllClear.Count -eq 0) 'All clear must clear every store.'
 Write-Host 'LogStore behavior passed.'
+
+Write-Host '== Diagnostic log UI validation =='
+$theme = Get-MphTheme
+$i18n = Get-MphI18n -Lang 'en'
+$multiPanel = New-DiagnosticLogPanel -Theme $theme -I18n $i18n -SourceOptions @(
+    @{ Key = 'All'; Text = $i18n.logAll },
+    @{ Key = 'Wiimmfi'; Text = $i18n.logWiimmfi },
+    @{ Key = 'WiiLink'; Text = $i18n.logWiiLink },
+    @{ Key = 'App'; Text = $i18n.logApp }
+)
+$singlePanel = New-DiagnosticLogPanel -Theme $theme -I18n $i18n -SourceOptions @(
+    @{ Key = 'Wiimmfi'; Text = $i18n.logWiimmfi }
+)
+try {
+    Assert-True ($multiPanel.SourceCombo.Items.Count -eq 4) 'Unified log source selector must contain four choices.'
+    Assert-True ($multiPanel.SourceCombo.Visible) 'Unified log source selector must be visible.'
+    $multiPanel.SourceCombo.SelectedIndex = 1
+    Assert-True ((Get-DiagnosticLogSource -LogPanel $multiPanel) -eq 'Wiimmfi') 'Source selector must map display text to the Wiimmfi source key.'
+    $multiPanel.SourceCombo.SelectedIndex = 2
+    Assert-True ((Get-DiagnosticLogSource -LogPanel $multiPanel) -eq 'WiiLink') 'Source selector must map display text to the WiiLink source key.'
+    Assert-True (-not $singlePanel.SourceCombo.Visible) 'Single-source viewers must hide the redundant source selector.'
+    Set-DiagnosticLogEntries -LogPanel $multiPanel -Entries $withDebug -Theme $theme
+    Assert-True ($multiPanel.LogBox.Text -match '\[Wiimmfi\]') 'Rendered log must identify Wiimmfi entries.'
+    Assert-True ($multiPanel.LogBox.Text -match '\[WiiLink\]') 'Rendered log must identify WiiLink entries.'
+} finally {
+    try { $multiPanel.Panel.Dispose() } catch {}
+    try { $singlePanel.Panel.Dispose() } catch {}
+}
+Write-Host 'Diagnostic log UI passed.'
 
 Write-Host '== Direct API integration test =='
 $directStore = New-MphLogStore -Source 'WiiLink'
