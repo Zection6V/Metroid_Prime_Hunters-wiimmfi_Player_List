@@ -9,6 +9,7 @@ $script:WiimmfiDefaultUrl = 'https://wiimmfi.de/stats/game/mprimeds'
 $script:WiimmfiTextUrl = 'https://wiimmfi.de/stats/game/mprimeds/text'
 
 . (Join-Path $PSScriptRoot 'I18n.ps1')
+. (Join-Path $PSScriptRoot 'PayloadLog.ps1')
 
 function Write-WiimmfiDiagnostic {
     param(
@@ -102,6 +103,7 @@ function Get-WiimmfiText {
 
         $bytes = [Text.Encoding]::UTF8.GetByteCount([string]$txt)
         Write-WiimmfiDiagnostic $LogQueue 'INFO' 'FETCH' ("text endpoint completed; bytes={0}; elapsedMs={1}" -f $bytes, $watch.ElapsedMilliseconds)
+        Write-MphPayloadLog -LogQueue $LogQueue -Source 'Wiimmfi' -Name 'wiimmfi.text.raw' -Content $txt -ContentType 'text/plain; charset=utf-8'
         return [string]$txt
     } catch {
         Write-WiimmfiDiagnostic $LogQueue 'WARN' 'FETCH' ("{0}: {1}" -f $_.Exception.GetType().FullName, $_.Exception.Message)
