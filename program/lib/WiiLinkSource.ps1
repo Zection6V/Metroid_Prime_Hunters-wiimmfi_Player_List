@@ -145,6 +145,7 @@ function Get-WiiLinkData {
         $watch.Stop()
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("stats completed; transport={0}; HTTP={1}; bytes={2}; elapsedMs={3}" -f $Transport, $statsPayload.status, $statsPayload.bytes, $watch.ElapsedMilliseconds)
         Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'HTTP' ("stats Content-Type={0}" -f $statsPayload.contentType)
+        Write-MphPayloadLog -LogQueue $LogQueue -Source 'WiiLink' -Name 'stats.raw.json' -Content $statsPayload.text -ContentType $statsPayload.contentType
 
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("Requesting groups API via {0}" -f $Transport)
         $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -152,6 +153,7 @@ function Get-WiiLinkData {
         $watch.Stop()
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("groups completed; transport={0}; HTTP={1}; bytes={2}; elapsedMs={3}" -f $Transport, $groupsPayload.status, $groupsPayload.bytes, $watch.ElapsedMilliseconds)
         Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'HTTP' ("groups Content-Type={0}" -f $groupsPayload.contentType)
+        Write-MphPayloadLog -LogQueue $LogQueue -Source 'WiiLink' -Name 'groups.raw.json' -Content $groupsPayload.text -ContentType $groupsPayload.contentType
 
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'JSON' 'Parsing stats JSON'
         $s = $statsPayload.text | ConvertFrom-Json
