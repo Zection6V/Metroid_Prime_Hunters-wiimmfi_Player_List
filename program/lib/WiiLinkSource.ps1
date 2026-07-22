@@ -28,7 +28,8 @@ function Write-WiiLinkDiagnostic {
         [string]$Stage,
         [string]$Message
     )
-    if (-not $LogQueue) { return }
+    # 空の Queue は PowerShell の条件式で $false になるため、存在確認は $null 比較で行う。
+    if ($null -eq $LogQueue) { return }
     try {
         $LogQueue.Enqueue(@{
                 time = [datetime]::Now
