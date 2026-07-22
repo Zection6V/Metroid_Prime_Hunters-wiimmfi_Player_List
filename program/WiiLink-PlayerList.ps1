@@ -1,14 +1,6 @@
 ﻿<#
     WiiLink WFC - MPH Player List  (WiiLink 専用ビューワ)  — PowerShell + WinForms
-    ----------------------------------------------------------------------------
-    責務分離（SRP）:
-      lib\WiiLinkSource.ps1 … 情報取得（公式 JSON API、ブラウザ不要）
-      lib\TreeRender.ps1    … TreeView 描画
-      lib\ViewerCommon.ps1  … UI 部品・ワーカー基盤（共通）
-      本ファイル            … 画面構成と進行
-
-    依存: Windows + PowerShell 5.1 のみ。
-    起動: "Run WiiLink Player List.bat"。 -SelfTest で診断モード。
+    直接API / Chrome・Edge の取得方式を実行中に切替可能。
 #>
 param([switch]$SelfTest)
 
@@ -26,41 +18,78 @@ $WiiLinkLib = Join-Path $ScriptDir 'lib\WiiLinkSource.ps1'
 $theme = Get-MphTheme
 $i18n = Get-MphI18n
 
-# ---- GUI ----
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "WiiLink WFC - MPH Player List"
-$form.Size = New-Object System.Drawing.Size(560, 600)
-$form.MinimumSize = New-Object System.Drawing.Size(420, 380)
+$form.Size = New-Object System.Drawing.Size(760, 600)
+$form.MinimumSize = New-Object System.Drawing.Size(620, 380)
 $form.StartPosition = 'CenterScreen'; $form.BackColor = $theme.bgDark
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 
 $bar = New-TopBar -Theme $theme -Title "WiiLink WFC" -TitleColor $theme.green -I18n $i18n
+$wlTransport = New-WiiLinkTransportSelector -Theme $theme -I18n $i18n -Flow $bar.Flow
 $pane = New-TreePanel -Theme $theme -HeadColor $theme.green
 $status = New-StatusBar -Theme $theme -Text $i18n.connecting
-# Dock の解決順のため Fill(コンテンツ) を先に、Top/Bottom を後に追加する（z-order 操作はしない）
 $form.Controls.Add($pane.Panel); $form.Controls.Add($bar.Panel); $form.Controls.Add($status)
 
-# ---- ワーカー ----
 $sync = [hashtable]::Synchronized(@{
         WiiLinkLib = $WiiLinkLib; Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'; Lang = $i18n.lang
         IntervalMs = 30000; Stop = $false; Refresh = $false; Json = $null; Seq = 0; Status = 'starting'
+        Transport = 'direct'; BrowserPid = 0
     })
 $worker = @'
 . $sync.WiiLinkLib
-while (-not $sync.Stop) {
-    $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua -Lang $sync.Lang
-    $sync.Json = ($data | ConvertTo-Json -Depth 10 -Compress)
-    $sync.Seq = [int]$sync.Seq + 1
-    $sync.Status = if ($data.ok) { 'ok' } else { 'error' }
-    $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
-    $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop -and -not $sync.Refresh) { Start-Sleep -Milliseconds 200; $slept += 200 }
-    $sync.Refresh = $false   # Refresh ボタンで待機を打ち切り即時再取得
+$browserCtx = $null
+try {
+    while (-not $sync.Stop) {
+        $transport = [string]$sync.Transport
+        if ($transport -eq 'browser') {
+            if (-not $browserCtx -or -not $browserCtx.ok -or $browserCtx.proc.HasExited) {
+                if ($browserCtx) { Stop-WiiLinkBrowser -Context $browserCtx; $browserCtx = $null }
+                $browserCtx = Start-WiiLinkBrowser
+                if ($browserCtx.ok) { $sync.BrowserPid = $browserCtx.proc.Id } else { $sync.BrowserPid = 0 }
+            }
+        } elseif ($browserCtx) {
+            Stop-WiiLinkBrowser -Context $browserCtx
+            $browserCtx = $null; $sync.BrowserPid = 0
+        }
+
+        if ($transport -eq 'browser' -and (-not $browserCtx -or -not $browserCtx.ok)) {
+            $data = @{ ok = $false; state = 'error'; error = 'no-browser'; transport = 'browser'; stats = @{ online = 0; active = 0; groups = 0 }; rooms = @() }
+        } else {
+            $port = if ($transport -eq 'browser') { [int]$browserCtx.port } else { 0 }
+            $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua -Lang $sync.Lang -Transport $transport -BrowserPort $port
+        }
+
+        $sync.Json = ($data | ConvertTo-Json -Depth 10 -Compress)
+        $sync.Seq = [int]$sync.Seq + 1
+        $roomCount = @($data.rooms).Count
+        $playerCount = 0
+        foreach ($room in @($data.rooms)) { $playerCount += @($room.players).Count }
+        $prefix = if ($transport -eq 'browser') { 'Chrome/Edge' } else { 'Direct API' }
+        switch ([string]$data.state) {
+            'ok'      { $sync.Status = ('{0}: OK rooms={1} players={2}' -f $prefix, $roomCount, $playerCount) }
+            'empty'   { $sync.Status = ('{0}: EMPTY rooms=0 players=0' -f $prefix) }
+            'partial' { $sync.Status = ('{0}: PARTIAL stats-groups={1} parsed-rooms={2}' -f $prefix, [int]$data.stats.groups, $roomCount) }
+            default   { $sync.Status = ('{0}: ERROR {1}' -f $prefix, [string]$data.error) }
+        }
+        $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
+        $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop -and -not $sync.Refresh -and ([string]$sync.Transport -eq $transport)) { Start-Sleep -Milliseconds 200; $slept += 200 }
+        $sync.Refresh = $false
+    }
+} finally {
+    if ($browserCtx) { Stop-WiiLinkBrowser -Context $browserCtx }
+    $sync.BrowserPid = 0
 }
 '@
 $job = Start-PollWorker -Sync $sync -Body $worker
 
-# ---- UI タイマー ----
 $bar.Combo.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$bar.IntervalMap[[string]$bar.Combo.SelectedItem] })
+$wlTransport.Combo.Add_SelectedIndexChanged({
+        $newTransport = if ($wlTransport.Combo.SelectedIndex -eq 1) { 'browser' } else { 'direct' }
+        if ([string]$sync.Transport -ne $newTransport) {
+            $sync.Transport = $newTransport; $sync.Refresh = $true; $status.Text = $i18n.refreshing
+        }
+    })
 $bar.Refresh.Add_Click({ $sync.Refresh = $true; $status.Text = $i18n.refreshing })
 $script:LastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
@@ -74,24 +103,27 @@ $uiTimer.Add_Tick({
     })
 $form.Add_Shown({ $uiTimer.Start() })
 $form.Add_FormClosing({
-        try { $uiTimer.Stop() } catch {}; try { $sync.Stop = $true } catch {}; try { Start-Sleep -Milliseconds 150 } catch {}
+        try { $uiTimer.Stop() } catch {}; try { $sync.Stop = $true } catch {}; try { Start-Sleep -Milliseconds 250 } catch {}
         Stop-PollWorker $job
+        try { if ($sync.BrowserPid -gt 0) { & taskkill /PID $sync.BrowserPid /T /F 2>$null | Out-Null } } catch {}
     })
 
-# ---- 診断モード ----
 if ($SelfTest) {
     $log = Join-Path $env:TEMP 'wiilink_selftest.log'; Remove-Item $log -EA SilentlyContinue
     function L($m) { Add-Content -Path $log -Value $m -Encoding UTF8 }
     try {
+        L ("TRANSPORT SELECTOR items=$($wlTransport.Combo.Items.Count) selected=$($wlTransport.Combo.SelectedItem)")
         $deadline = (Get-Date).AddSeconds(30)
         while ((Get-Date) -lt $deadline -and [int]$sync.Seq -lt 1) { Start-Sleep -Milliseconds 250 }
-        L ("Seq=$($sync.Seq) Status=$($sync.Status)")
+        L ("Seq=$($sync.Seq) Status=$($sync.Status) Transport=$($sync.Transport)")
         Update-WiiLinkTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors -I18n $i18n
         L ("head: " + $pane.Head.Text); L ("room nodes: " + $pane.Tree.Nodes.Count)
-        foreach ($rn in $pane.Tree.Nodes) { L ("   " + $rn.Text); foreach ($pn in $rn.Nodes) { if ($pn.Tag.Key -like 'wl:*') { L ("      " + $pn.Text) } } }
         L "RESULT: SUCCESS"
     } catch { L ("EXCEPTION: " + $_.Exception.Message); L ($_.ScriptStackTrace) }
-    finally { try { $sync.Stop = $true; Start-Sleep -Milliseconds 150 } catch {}; Stop-PollWorker $job }
+    finally {
+        try { $sync.Stop = $true; Start-Sleep -Milliseconds 250 } catch {}; Stop-PollWorker $job
+        try { if ($sync.BrowserPid -gt 0) { Stop-Process -Id $sync.BrowserPid -Force -EA SilentlyContinue } } catch {}
+    }
     return
 }
 
