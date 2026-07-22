@@ -2,11 +2,6 @@
     I18n.ps1 — 多言語文字列（日本語 / 英語）の単一ソース
 
     OS の UI 言語が日本語なら日本語、それ以外は英語を返す。環境変数 MPH_LANG=ja|en で上書き可。
-
-    公開関数:
-      Get-MphLang                 … 'ja' または 'en'
-      Get-MphI18n  [-Lang]        … 現在言語の文字列テーブル（ハッシュテーブル）を返す
-                                     UI 文言 + データ用サブマップ（olStat/status/mode/...）を含む
 #>
 
 function Get-MphLang {
@@ -15,7 +10,6 @@ function Get-MphLang {
     return 'en'
 }
 
-# 大文字小文字を区別するマップ（ol_stat は G/g, C/c を区別する必要があるため）
 function New-OrdinalMap {
     param([string[]]$Keys, [string[]]$Values)
     $h = [System.Collections.Hashtable]::new([System.StringComparer]::Ordinal)
@@ -37,6 +31,7 @@ function Get-MphI18n {
             roomFmt = '{0} の部屋'; awaitingHost = 'ホスト待ち'; roleHost = 'ホスト'; roleMember = 'メンバー'
             diagnosticLog = '診断ログ'; logExpand = 'ログ ▼'; logCollapse = 'ログ ▲'; logCopy = 'コピー'; logClear = '消去'
             logAutoScroll = '自動スクロール'; logDetails = '詳細'; logCopied = '診断ログをクリップボードへコピーしました'
+            wlTransport = 'WiiLink取得:'; wlDirect = '直接API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink取得方式を {0} に変更しました'
             intervals = [ordered]@{ '15秒' = 15000; '30秒' = 30000; '1分' = 60000; '2分' = 120000; '5分' = 300000 }
             status = @{ '0' = 'オフライン'; '1' = 'オンライン（待機中）'; '2' = 'ルーム/グローバルのゲスト'; '3' = 'グローバル検索中'; '4' = 'プライベートルーム接続中'; '5' = 'ルーム/グローバルのホスト'; '6' = 'ホスト' }
             mode = @{ '0' = 'サバイバル / なし'; '1' = 'バトル / バウンティ'; '2' = 'ディフェンダー / キャプチャ'; '3' = 'プライムハンター / ノード' }
@@ -56,6 +51,7 @@ function Get-MphI18n {
         roomFmt = "{0}'s room"; awaitingHost = 'Awaiting host'; roleHost = 'Host'; roleMember = 'Member'
         diagnosticLog = 'Diagnostic log'; logExpand = 'Log ▼'; logCollapse = 'Log ▲'; logCopy = 'Copy'; logClear = 'Clear'
         logAutoScroll = 'Auto-scroll'; logDetails = 'Details'; logCopied = 'Diagnostic log copied to clipboard'
+        wlTransport = 'WiiLink via:'; wlDirect = 'Direct API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink transport changed to {0}'
         intervals = [ordered]@{ '15 sec' = 15000; '30 sec' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
         status = @{ '0' = 'Offline'; '1' = 'Online (idle)'; '2' = 'Guest (Room/Global)'; '3' = 'Searching (Global)'; '4' = 'Connecting (Private Room)'; '5' = 'Host (Room/Global)'; '6' = 'Host' }
         mode = @{ '0' = 'Survival / None'; '1' = 'Battle / Bounty'; '2' = 'Defender / Capture'; '3' = 'Prime Hunter / Nodes' }
