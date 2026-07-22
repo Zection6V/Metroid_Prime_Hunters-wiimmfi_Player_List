@@ -2,7 +2,6 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $programDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$repoRoot = Split-Path -Parent $programDir
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -16,7 +15,7 @@ Get-ChildItem -Path $programDir -Recurse -Filter '*.ps1' | ForEach-Object {
     $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
     if ($errors.Count -gt 0) {
-        foreach ($e in $errors) { $parseFailures += "${($_.FullName)}:$($e.Extent.StartLineNumber): $($e.Message)" }
+        foreach ($e in $errors) { $parseFailures += ("{0}:{1}: {2}" -f $_.FullName, $e.Extent.StartLineNumber, $e.Message) }
     }
 }
 if ($parseFailures.Count -gt 0) { throw ($parseFailures -join [Environment]::NewLine) }
