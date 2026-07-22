@@ -1,0 +1,39 @@
+name: WiiLink transport tests
+
+on:
+  push:
+    paths:
+      - 'program/**'
+      - '.github/workflows/wiilink-transport-tests.yml'
+  pull_request:
+    paths:
+      - 'program/**'
+      - '.github/workflows/wiilink-transport-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-wiilink-transports:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show browser availability
+        shell: powershell
+        run: |
+          $edge = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe' -ErrorAction SilentlyContinue).'(default)'
+          $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)'
+          Write-Host "Edge=$edge"
+          Write-Host "Chrome=$chrome"
+
+      - name: Test syntax, direct API, and Chrome or Edge transport
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-WiiLinkTransports.ps1
