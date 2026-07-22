@@ -23,6 +23,41 @@ Write-Host 'All PowerShell files parsed successfully.'
 
 . (Join-Path $programDir 'lib\WiiLinkSource.ps1')
 
+Write-Host '== GUI localization validation =='
+$supportedLanguages = @('ja', 'en', 'de', 'fr', 'it', 'es')
+$reference = Get-MphI18n -Lang 'en'
+$referenceKeys = @($reference.Keys | Sort-Object)
+$referenceStatusKeys = @($reference.status.Keys | Sort-Object)
+$referenceModeKeys = @($reference.mode.Keys | Sort-Object)
+$referenceOlKeys = @($reference.olStat.Keys | Sort-Object)
+
+foreach ($lang in $supportedLanguages) {
+    $table = Get-MphI18n -Lang $lang
+    Assert-True ($table.lang -eq $lang) ("Language table must report {0}, got {1}" -f $lang, $table.lang)
+    Assert-True ((Compare-Object $referenceKeys @($table.Keys | Sort-Object)).Count -eq 0) ("Top-level translation keys differ for {0}" -f $lang)
+    Assert-True ((Compare-Object $referenceStatusKeys @($table.status.Keys | Sort-Object)).Count -eq 0) ("Status translation keys differ for {0}" -f $lang)
+    Assert-True ((Compare-Object $referenceModeKeys @($table.mode.Keys | Sort-Object)).Count -eq 0) ("Mode translation keys differ for {0}" -f $lang)
+    Assert-True ((Compare-Object $referenceOlKeys @($table.olStat.Keys | Sort-Object)).Count -eq 0) ("Online-state translation keys differ for {0}" -f $lang)
+    Assert-True ($table.intervals.Count -eq 5) ("Interval choices missing for {0}" -f $lang)
+    foreach ($key in $referenceKeys) {
+        if ($key -in @('status', 'mode', 'olStat', 'intervals')) { continue }
+        Assert-True (-not [string]::IsNullOrWhiteSpace([string]$table[$key])) ("Translation {0}.{1} is empty" -f $lang, $key)
+    }
+    Write-Host ("Localization passed: {0}" -f $lang)
+}
+
+$oldOverride = $env:MPH_LANG
+try {
+    foreach ($lang in $supportedLanguages) {
+        $env:MPH_LANG = $lang.ToUpperInvariant()
+        Assert-True ((Get-MphLang) -eq $lang) ("MPH_LANG override failed for {0}" -f $lang)
+    }
+    $env:MPH_LANG = 'unsupported'
+    Assert-True ((Get-MphI18n -Lang 'unsupported').lang -eq 'en') 'Unknown explicit language must fall back to English.'
+} finally {
+    $env:MPH_LANG = $oldOverride
+}
+
 Write-Host '== Static transport surface validation =='
 $sourceText = Get-Content -LiteralPath (Join-Path $programDir 'lib\WiiLinkSource.ps1') -Raw
 $unifiedText = Get-Content -LiteralPath (Join-Path $programDir 'MPH-Unified.ps1') -Raw
