@@ -15,7 +15,23 @@ permissions:
   contents: read
 
 jobs:
+  payload-logging:
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test payload chunking, truncation, and source integration
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-PayloadLogging.ps1
+
   logging-core:
+    needs: payload-logging
     runs-on: windows-latest
     timeout-minutes: 5
 
