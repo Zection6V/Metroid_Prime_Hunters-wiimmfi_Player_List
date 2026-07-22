@@ -6,7 +6,7 @@
     公開関数:
       Get-MphLang                 … 'ja' または 'en'
       Get-MphI18n  [-Lang]        … 現在言語の文字列テーブル（ハッシュテーブル）を返す
-                                    UI 文言 + データ用サブマップ（olStat/status/mode/...）を含む
+                                     UI 文言 + データ用サブマップ（olStat/status/mode/...）を含む
 #>
 
 function Get-MphLang {
@@ -35,6 +35,8 @@ function Get-MphI18n {
             fcCap = 'フレンドコード:'; onlineCap = 'オンライン状態:'; statusCap = 'ステータス:'; modeCap = 'モード:'
             playersCap = '人数:'; joinCap = '参加:'; roleCap = '役割:'; pidCap = 'PID:'; connFailCap = '接続失敗:'; createdCap = '作成:'
             roomFmt = '{0} の部屋'; awaitingHost = 'ホスト待ち'; roleHost = 'ホスト'; roleMember = 'メンバー'
+            diagnosticLog = '診断ログ'; logExpand = 'ログ ▼'; logCollapse = 'ログ ▲'; logCopy = 'コピー'; logClear = '消去'
+            logAutoScroll = '自動スクロール'; logDetails = '詳細'; logCopied = '診断ログをクリップボードへコピーしました'
             intervals = [ordered]@{ '15秒' = 15000; '30秒' = 30000; '1分' = 60000; '2分' = 120000; '5分' = 300000 }
             status = @{ '0' = 'オフライン'; '1' = 'オンライン（待機中）'; '2' = 'ルーム/グローバルのゲスト'; '3' = 'グローバル検索中'; '4' = 'プライベートルーム接続中'; '5' = 'ルーム/グローバルのホスト'; '6' = 'ホスト' }
             mode = @{ '0' = 'サバイバル / なし'; '1' = 'バトル / バウンティ'; '2' = 'ディフェンダー / キャプチャ'; '3' = 'プライムハンター / ノード' }
@@ -52,6 +54,8 @@ function Get-MphI18n {
         fcCap = 'Friend Code:'; onlineCap = 'Online:'; statusCap = 'Status:'; modeCap = 'Mode:'
         playersCap = 'Players:'; joinCap = 'Join:'; roleCap = 'Role:'; pidCap = 'PID:'; connFailCap = 'Conn fails:'; createdCap = 'Created:'
         roomFmt = "{0}'s room"; awaitingHost = 'Awaiting host'; roleHost = 'Host'; roleMember = 'Member'
+        diagnosticLog = 'Diagnostic log'; logExpand = 'Log ▼'; logCollapse = 'Log ▲'; logCopy = 'Copy'; logClear = 'Clear'
+        logAutoScroll = 'Auto-scroll'; logDetails = 'Details'; logCopied = 'Diagnostic log copied to clipboard'
         intervals = [ordered]@{ '15 sec' = 15000; '30 sec' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
         status = @{ '0' = 'Offline'; '1' = 'Online (idle)'; '2' = 'Guest (Room/Global)'; '3' = 'Searching (Global)'; '4' = 'Connecting (Private Room)'; '5' = 'Host (Room/Global)'; '6' = 'Host' }
         mode = @{ '0' = 'Survival / None'; '1' = 'Battle / Bounty'; '2' = 'Defender / Capture'; '3' = 'Prime Hunter / Nodes' }
