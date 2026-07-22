@@ -1,4 +1,4 @@
-name: WiiLink transport tests
+name: Player list diagnostics tests
 
 on:
   push:
@@ -15,7 +15,23 @@ permissions:
   contents: read
 
 jobs:
+  logging-core:
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test empty Queue logging and source emitters
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-LoggingCore.ps1
+
   test-wiilink-transports:
+    needs: logging-core
     runs-on: windows-latest
     timeout-minutes: 10
 
@@ -31,7 +47,7 @@ jobs:
           Write-Host "Edge=$edge"
           Write-Host "Chrome=$chrome"
 
-      - name: Test syntax, direct API, and Chrome or Edge transport
+      - name: Test syntax, log UI, direct API, and Chrome or Edge transport
         shell: powershell
         env:
           MPH_LANG: en
