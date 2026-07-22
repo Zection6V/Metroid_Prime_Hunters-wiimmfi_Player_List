@@ -1,21 +1,6 @@
 ﻿<#
     MPH Unified Player List  (Wiimmfi + WiiLink WFC)  — PowerShell + WinForms
-    ------------------------------------------------------------------------
     1 画面で wiimmfi と WiiLink WFC のオンライン状況を同時に表示する統合ビューワ。
-
-    責務分離（SRP）:
-      lib\WiimmfiSource.ps1 / lib\WiiLinkSource.ps1  … 情報取得（データ）
-      lib\TreeRender.ps1                             … TreeView 描画（表示）
-      lib\ViewerCommon.ps1                           … UI 部品・ワーカー基盤（共通）
-      本ファイル                                     … 画面構成と進行（ビューワ）
-
-    - 左右 2 ペイン（TableLayoutPanel 50/50 + Dock）でレスポンシブ。横スクロール無し。
-    - ネットワーク取得は各サーバごとの別 runspace で実行し、UI を固めない。
-    - ポーリング間隔を選択可能（サーバ負荷に配慮し既定 30 秒）。
-
-    依存: Windows + PowerShell 5.1。Wiimmfi 側のみ Chrome/Edge が必要（無ければ
-          その旨を表示し、WiiLink 側は通常どおり動作する）。
-    起動: "Run MPH Unified.bat" をダブルクリック。 -SelfTest で診断モード。
 #>
 param([switch]$SelfTest)
 
@@ -40,8 +25,8 @@ $i18n = Get-MphI18n
 # ============================================================================
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "MPH Player List  -  Wiimmfi + WiiLink"
-$form.Size = New-Object System.Drawing.Size(1000, 620)
-$form.MinimumSize = New-Object System.Drawing.Size(760, 460)
+$form.Size = New-Object System.Drawing.Size(1000, 680)
+$form.MinimumSize = New-Object System.Drawing.Size(760, 500)
 $form.StartPosition = 'CenterScreen'; $form.BackColor = $theme.bgDark
 $form.Font = New-Object System.Drawing.Font("Segoe UI", 10)
 
@@ -57,13 +42,18 @@ $grid.Controls.Add($wm.Panel, 0, 0)
 $grid.Controls.Add($wl.Panel, 1, 0)
 
 $status = New-StatusBar -Theme $theme -Text $i18n.connecting
+$diagnostic = New-DiagnosticLogPanel -Theme $theme -I18n $i18n -ExpandedHeight 230
 
-# Dock の解決順のため Fill(grid) を先に、Top/Bottom を後に追加する（z-order 操作はしない）
-$form.Controls.Add($grid); $form.Controls.Add($bar.Panel); $form.Controls.Add($status)
+# Fill を先に、Dock 指定済みの Top/Bottom を後に追加する。
+$form.Controls.Add($grid)
+$form.Controls.Add($bar.Panel)
+$form.Controls.Add($status)
+$form.Controls.Add($diagnostic.Panel)
 
 # ============================================================================
 # バックグラウンドワーカー（サーバごとに別 runspace）
 # ============================================================================
+$logQueue = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
 $sync = [hashtable]::Synchronized(@{
         WiimmfiLib = $WiimmfiLib; WiiLinkLib = $WiiLinkLib
         WiimmfiUrl = 'https://wiimmfi.de/stats/game/mprimeds'
@@ -71,6 +61,7 @@ $sync = [hashtable]::Synchronized(@{
         IntervalMs = 30000; Stop = $false; WiimmfiRefresh = $false; WiiLinkRefresh = $false
         WiimmfiJson = $null; WiimmfiSeq = 0; WiimmfiStatus = 'starting'; WiimmfiPid = 0
         WiiLinkJson = $null; WiiLinkSeq = 0; WiiLinkStatus = 'starting'
+        LogQueue = $logQueue
     })
 
 $wmWorker = @'
@@ -90,7 +81,7 @@ try {
         $sync.WiimmfiStatus = if ($data.ok) { 'ok' } else { 'connecting' }
         $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
         $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop -and -not $sync.WiimmfiRefresh) { Start-Sleep -Milliseconds 200; $slept += 200 }
-        $sync.WiimmfiRefresh = $false   # Refresh ボタンで待機を打ち切り即時再取得
+        $sync.WiimmfiRefresh = $false
     }
 } finally { Stop-WiimmfiBrowser -Proc $ctx.proc }
 '@
@@ -98,13 +89,21 @@ try {
 $wlWorker = @'
 . $sync.WiiLinkLib
 while (-not $sync.Stop) {
-    $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua -Lang $sync.Lang
+    $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua -Lang $sync.Lang -LogQueue $sync.LogQueue
     $sync.WiiLinkJson = ($data | ConvertTo-Json -Depth 10 -Compress)
     $sync.WiiLinkSeq = [int]$sync.WiiLinkSeq + 1
-    $sync.WiiLinkStatus = if ($data.ok) { 'ok' } else { 'error' }
+    $roomCount = @($data.rooms).Count
+    $playerCount = 0
+    foreach ($room in @($data.rooms)) { $playerCount += @($room.players).Count }
+    switch ([string]$data.state) {
+        'ok'      { $sync.WiiLinkStatus = ('OK rooms={0} players={1}' -f $roomCount, $playerCount) }
+        'empty'   { $sync.WiiLinkStatus = 'EMPTY rooms=0 players=0' }
+        'partial' { $sync.WiiLinkStatus = ('PARTIAL stats-groups={0} parsed-rooms={1}' -f [int]$data.stats.groups, $roomCount) }
+        default   { $sync.WiiLinkStatus = ('ERROR {0}' -f [string]$data.error) }
+    }
     $waitMs = if ($data.ok) { [int]$sync.IntervalMs } else { 3000 }
     $slept = 0; while ($slept -lt $waitMs -and -not $sync.Stop -and -not $sync.WiiLinkRefresh) { Start-Sleep -Milliseconds 200; $slept += 200 }
-    $sync.WiiLinkRefresh = $false   # Refresh ボタンで待機を打ち切り即時再取得
+    $sync.WiiLinkRefresh = $false
 }
 '@
 
@@ -112,11 +111,27 @@ $wmJob = Start-PollWorker -Sync $sync -Body $wmWorker
 $wlJob = Start-PollWorker -Sync $sync -Body $wlWorker
 
 # ============================================================================
-# UI タイマー（描画は lib\TreeRender.ps1 の共有関数に委譲）
+# UI イベント
 # ============================================================================
 $bar.Combo.Add_SelectedIndexChanged({ $sync.IntervalMs = [int]$bar.IntervalMap[[string]$bar.Combo.SelectedItem] })
-$bar.Refresh.Add_Click({ $sync.WiimmfiRefresh = $true; $sync.WiiLinkRefresh = $true; $status.Text = $i18n.refreshing })
+$bar.Refresh.Add_Click({
+        $sync.WiimmfiRefresh = $true; $sync.WiiLinkRefresh = $true; $status.Text = $i18n.refreshing
+        try { $sync.LogQueue.Enqueue(@{ time = [datetime]::Now; source = 'App'; level = 'INFO'; stage = 'UI'; message = 'Manual refresh requested' }) } catch {}
+    })
+$diagnostic.Toggle.Add_Click({ Set-DiagnosticLogExpanded -LogPanel $diagnostic -Expanded (-not [bool]$diagnostic.Expanded) -I18n $i18n })
+$diagnostic.Clear.Add_Click({ $diagnostic.LogBox.Clear() })
+$diagnostic.Copy.Add_Click({
+        try {
+            if ($diagnostic.LogBox.TextLength -gt 0) {
+                [System.Windows.Forms.Clipboard]::SetText($diagnostic.LogBox.Text)
+                $status.Text = $i18n.logCopied
+            }
+        } catch { $status.Text = $_.Exception.Message }
+    })
 
+# ============================================================================
+# UI タイマー（描画 + 診断ログキュー排出）
+# ============================================================================
 $script:WmLastSeq = -1; $script:WlLastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 300
@@ -128,6 +143,12 @@ $uiTimer.Add_Tick({
         if ($sync.WiiLinkSeq -ne $script:WlLastSeq) {
             $script:WlLastSeq = $sync.WiiLinkSeq
             Update-WiiLinkTree -Tree $wl.Tree -Head $wl.Head -Json $sync.WiiLinkJson -Colors $theme.Colors -I18n $i18n
+        }
+        $drained = 0
+        while ($sync.LogQueue.Count -gt 0 -and $drained -lt 200) {
+            $entry = $sync.LogQueue.Dequeue()
+            Add-DiagnosticLog -LogPanel $diagnostic -Entry $entry -Theme $theme -MaxLines 1000
+            $drained++
         }
         $status.Text = ("{0}: {1}     Wiimmfi: {2}     WiiLink: {3}" -f $i18n.intervalLabel, $bar.Combo.SelectedItem, $sync.WiimmfiStatus, $sync.WiiLinkStatus)
     })
@@ -150,10 +171,12 @@ if ($SelfTest) {
     function L($m) { Add-Content -Path $log -Value $m -Encoding UTF8 }
     try {
         L "FORM BUILT OK; controls=$($form.Controls.Count)"
+        L "DIAGNOSTIC PANEL BUILT; controls=$($diagnostic.Panel.Controls.Count)"
         $deadline = (Get-Date).AddSeconds(55)
         while ((Get-Date) -lt $deadline -and ([int]$sync.WiiLinkSeq -lt 1 -or ($sync.WiimmfiStatus -ne 'ok' -and $sync.WiimmfiStatus -ne 'no-browser'))) { Start-Sleep -Milliseconds 300 }
         L ("WiiLink Seq=$($sync.WiiLinkSeq) Status=$($sync.WiiLinkStatus)")
         L ("Wiimmfi Seq=$($sync.WiimmfiSeq) Status=$($sync.WiimmfiStatus)")
+        L ("Queued diagnostic entries=$($sync.LogQueue.Count)")
         Update-WiiLinkTree -Tree $wl.Tree -Head $wl.Head -Json $sync.WiiLinkJson -Colors $theme.Colors -I18n $i18n
         Update-WiimmfiTree -Tree $wm.Tree -Head $wm.Head -Json $sync.WiimmfiJson -Colors $theme.Colors -I18n $i18n
         L ("WiiLink head: " + $wl.Head.Text)
