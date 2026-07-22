@@ -18,6 +18,15 @@
 try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
 try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls13 } catch {}
 
+# プロキシ自動検出(WPAD)が原因で HTTP がハング→タイムアウトする環境があるため、既定では
+# プロキシを使わず直結する。プロキシが必要な場合は環境変数 MPH_PROXY を設定:
+#   MPH_PROXY=system            … Windows のシステムプロキシ設定を使う
+#   MPH_PROXY=http://host:port  … 指定プロキシを使う
+try {
+    if (-not $env:MPH_PROXY) { [System.Net.WebRequest]::DefaultWebProxy = $null }
+    elseif ($env:MPH_PROXY -ne 'system') { [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy($env:MPH_PROXY, $true) }
+} catch {}
+
 function Get-WiiLinkData {
     param(
         [string]$StatsUrl  = 'https://api.wfc.wiilink24.com/api/stats',
@@ -32,8 +41,8 @@ function Get-WiiLinkData {
         $h = @{ 'User-Agent' = $Ua }
         # API は Content-Type に charset を持たないため、PS5.1 の .Content では UTF-8 が
         # 文字化けする。生バイトを UTF-8 で明示デコードする。
-        $rs = Invoke-WebRequest -Uri $StatsUrl  -UseBasicParsing -TimeoutSec 15 -Headers $h
-        $rg = Invoke-WebRequest -Uri $GroupsUrl -UseBasicParsing -TimeoutSec 15 -Headers $h
+        $rs = Invoke-WebRequest -Uri $StatsUrl  -UseBasicParsing -TimeoutSec 30 -Headers $h
+        $rg = Invoke-WebRequest -Uri $GroupsUrl -UseBasicParsing -TimeoutSec 30 -Headers $h
         $statsJson  = [System.Text.Encoding]::UTF8.GetString($rs.RawContentStream.ToArray())
         $groupsJson = [System.Text.Encoding]::UTF8.GetString($rg.RawContentStream.ToArray())
 
