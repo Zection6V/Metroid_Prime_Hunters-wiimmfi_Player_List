@@ -2,13 +2,74 @@
     WiiLinkSource.ps1 — WiiLink WFC の情報取得ライブラリ（UI 非依存）
 
     Get-WiiLinkData は stats + groups を取得し、正規化データと診断状態を返す。
+    Transport: direct / browser
     state: ok / empty / partial / error
 #>
 
 . (Join-Path $PSScriptRoot 'I18n.ps1')
+. (Join-Path $PSScriptRoot 'WiimmfiSource.ps1')
 
 try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
 try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls13 } catch {}
+
+function Start-WiiLinkBrowser {
+    param([string]$Url = 'https://api.wfc.wiilink24.com/api/stats')
+    $browser = Find-Browser
+    if (-not $browser) { return @{ ok = $false; error = 'no-browser' } }
+    $port = Get-FreePort
+    $profile = Join-Path $env:TEMP ("mph_wiilink_profile_{0}" -f $PID)
+    $args = @(
+        "--remote-debugging-port=$port", "--user-data-dir=`"$profile`"",
+        '--no-first-run', '--no-default-browser-check', '--disable-background-timer-throttling',
+        '--disable-extensions', '--window-size=480,360', '--window-position=-32000,-32000', $Url
+    )
+    try {
+        $proc = Start-Process -FilePath $browser -ArgumentList $args -PassThru -WindowStyle Minimized
+        return @{ ok = $true; proc = $proc; port = $port; browser = $browser; profile = $profile }
+    } catch {
+        return @{ ok = $false; error = $_.Exception.Message }
+    }
+}
+
+function Stop-WiiLinkBrowser {
+    param($Context)
+    try { if ($Context -and $Context.proc -and -not $Context.proc.HasExited) { & taskkill /PID $Context.proc.Id /T /F 2>$null | Out-Null } } catch {}
+    try { if ($Context -and $Context.profile -and (Test-Path $Context.profile)) { Remove-Item -LiteralPath $Context.profile -Recurse -Force -EA SilentlyContinue } } catch {}
+}
+
+function Get-WiiLinkBrowserText {
+    param([int]$Port, [string]$Url, [int]$TimeoutSec = 20)
+    $tabs = Invoke-RestMethod "http://127.0.0.1:$Port/json" -TimeoutSec 10
+    $tab = $tabs | Where-Object { $_.type -eq 'page' -and $_.url -match 'wiilink24' } | Select-Object -First 1
+    if (-not $tab) { throw 'browser-not-ready' }
+    $safeUrl = $Url.Replace("'", "\'")
+    $expr = "fetch('$safeUrl',{cache:'no-store',credentials:'omit'}).then(function(r){return r.text().then(function(t){return JSON.stringify({ok:r.ok,status:r.status,body:t})})}).catch(function(e){return JSON.stringify({ok:false,status:0,error:String(e)})})"
+    $raw = Invoke-CdpEval -WsUrl $tab.webSocketDebuggerUrl -Expression $expr -TimeoutSec $TimeoutSec
+    if (-not $raw) { throw 'browser-fetch-empty-result' }
+    $envelope = $raw | ConvertFrom-Json
+    if (-not $envelope.ok) {
+        $msg = if ($envelope.error) { [string]$envelope.error } else { "HTTP $([int]$envelope.status)" }
+        throw ("browser-fetch-failed: {0}" -f $msg)
+    }
+    return @{ text = [string]$envelope.body; status = [int]$envelope.status; bytes = [Text.Encoding]::UTF8.GetByteCount([string]$envelope.body); contentType = 'application/json (browser fetch)' }
+}
+
+function Get-WiiLinkPayload {
+    param(
+        [ValidateSet('direct','browser')][string]$Transport,
+        [string]$Url,
+        [string]$Ua,
+        [int]$BrowserPort = 0
+    )
+    if ($Transport -eq 'browser') {
+        if ($BrowserPort -le 0) { throw 'browser-port-not-set' }
+        return Get-WiiLinkBrowserText -Port $BrowserPort -Url $Url
+    }
+    $h = @{ 'User-Agent' = $Ua; 'Accept' = 'application/json'; 'Accept-Encoding' = 'identity'; 'Cache-Control' = 'no-cache'; 'Pragma' = 'no-cache' }
+    $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 15 -Headers $h
+    $bytes = $r.RawContentStream.ToArray()
+    return @{ text = [Text.Encoding]::UTF8.GetString($bytes); status = [int]$r.StatusCode; bytes = $bytes.Length; contentType = [string]$r.Headers['Content-Type'] }
+}
 
 function Get-WiiLinkData {
     param(
@@ -17,11 +78,13 @@ function Get-WiiLinkData {
         [string]$Game      = 'mprimeds',
         [string]$Ua        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList',
         [string]$Lang      = (Get-MphLang),
+        [ValidateSet('direct','browser')][string]$Transport = 'direct',
+        [int]$BrowserPort = 0,
         $LogQueue = $null
     )
     $i = Get-MphI18n -Lang $Lang
     $result = @{
-        ok = $false; state = 'error'; error = ''
+        ok = $false; state = 'error'; error = ''; transport = $Transport
         stats = @{ online = 0; active = 0; groups = 0 }
         rooms = @(); diagnostics = @{ availableGames = @(); matchedGroups = 0; players = 0 }
     }
@@ -30,34 +93,27 @@ function Get-WiiLinkData {
         try { $LogQueue.Enqueue(@{ time = [datetime]::Now; source = 'WiiLink'; level = $Level; stage = $Stage; message = $Message }) } catch {}
     }
 
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    Add-WlLog 'INFO' 'START' ("Update started; game={0}" -f $Game)
-    Add-WlLog 'DEBUG' 'ENV' ("PowerShell={0}; OS={1}; TLS={2}" -f $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString, [System.Net.ServicePointManager]::SecurityProtocol)
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    Add-WlLog 'INFO' 'START' ("Update started; game={0}; transport={1}" -f $Game, $Transport)
+    Add-WlLog 'DEBUG' 'ENV' ("PowerShell={0}; OS={1}; TLS={2}; browserPort={3}" -f $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString, [Net.ServicePointManager]::SecurityProtocol, $BrowserPort)
 
     try {
-        $h = @{ 'User-Agent' = $Ua; 'Accept' = 'application/json'; 'Accept-Encoding' = 'identity'; 'Cache-Control' = 'no-cache'; 'Pragma' = 'no-cache' }
+        Add-WlLog 'INFO' 'HTTP' ("Requesting stats API via {0}" -f $Transport)
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $statsPayload = Get-WiiLinkPayload -Transport $Transport -Url $StatsUrl -Ua $Ua -BrowserPort $BrowserPort
+        $watch.Stop()
+        Add-WlLog 'INFO' 'HTTP' ("stats completed; transport={0}; HTTP={1}; bytes={2}; elapsedMs={3}" -f $Transport, $statsPayload.status, $statsPayload.bytes, $watch.ElapsedMilliseconds)
+        Add-WlLog 'DEBUG' 'HTTP' ("stats Content-Type={0}" -f $statsPayload.contentType)
 
-        Add-WlLog 'INFO' 'HTTP' 'Requesting stats API'
-        $statsWatch = [System.Diagnostics.Stopwatch]::StartNew()
-        $rs = Invoke-WebRequest -Uri $StatsUrl -UseBasicParsing -TimeoutSec 15 -Headers $h
-        $statsWatch.Stop()
-        $statsBytes = $rs.RawContentStream.ToArray()
-        Add-WlLog 'INFO' 'HTTP' ("stats completed; HTTP={0}; bytes={1}; elapsedMs={2}" -f [int]$rs.StatusCode, $statsBytes.Length, $statsWatch.ElapsedMilliseconds)
-        Add-WlLog 'DEBUG' 'HTTP' ("stats Content-Type={0}" -f [string]$rs.Headers['Content-Type'])
-
-        Add-WlLog 'INFO' 'HTTP' 'Requesting groups API'
-        $groupsWatch = [System.Diagnostics.Stopwatch]::StartNew()
-        $rg = Invoke-WebRequest -Uri $GroupsUrl -UseBasicParsing -TimeoutSec 15 -Headers $h
-        $groupsWatch.Stop()
-        $groupsBytes = $rg.RawContentStream.ToArray()
-        Add-WlLog 'INFO' 'HTTP' ("groups completed; HTTP={0}; bytes={1}; elapsedMs={2}" -f [int]$rg.StatusCode, $groupsBytes.Length, $groupsWatch.ElapsedMilliseconds)
-        Add-WlLog 'DEBUG' 'HTTP' ("groups Content-Type={0}" -f [string]$rg.Headers['Content-Type'])
-
-        $statsJson = [System.Text.Encoding]::UTF8.GetString($statsBytes)
-        $groupsJson = [System.Text.Encoding]::UTF8.GetString($groupsBytes)
+        Add-WlLog 'INFO' 'HTTP' ("Requesting groups API via {0}" -f $Transport)
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $groupsPayload = Get-WiiLinkPayload -Transport $Transport -Url $GroupsUrl -Ua $Ua -BrowserPort $BrowserPort
+        $watch.Stop()
+        Add-WlLog 'INFO' 'HTTP' ("groups completed; transport={0}; HTTP={1}; bytes={2}; elapsedMs={3}" -f $Transport, $groupsPayload.status, $groupsPayload.bytes, $watch.ElapsedMilliseconds)
+        Add-WlLog 'DEBUG' 'HTTP' ("groups Content-Type={0}" -f $groupsPayload.contentType)
 
         Add-WlLog 'INFO' 'JSON' 'Parsing stats JSON'
-        $s = $statsJson | ConvertFrom-Json
+        $s = $statsPayload.text | ConvertFrom-Json
         $statsProps = @($s.PSObject.Properties)
         $statsGame = $statsProps | Where-Object { ([string]$_.Name).Trim().ToLowerInvariant() -eq $Game.Trim().ToLowerInvariant() } | Select-Object -First 1
         if ($statsGame) {
@@ -69,7 +125,7 @@ function Get-WiiLinkData {
         }
 
         Add-WlLog 'INFO' 'JSON' 'Parsing groups JSON'
-        $all = @($groupsJson | ConvertFrom-Json)
+        $all = @($groupsPayload.text | ConvertFrom-Json)
         $availableGames = @($all | ForEach-Object { ([string]$_.game).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
         $result.diagnostics.availableGames = $availableGames
         Add-WlLog 'DEBUG' 'JSON' ("groups rootCount={0}; gameIds={1}" -f $all.Count, ($availableGames -join ','))
@@ -86,7 +142,6 @@ function Get-WiiLinkData {
             $joinLabel = if ($g.suspend) { $i.wlNotJoinable } else { $i.wlJoinable }
             $created = [string]$g.created
             try { $created = ([datetime]$g.created).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss') } catch {}
-
             $hostKey = [string]$g.host
             $players = @()
             $playerItems = @()
@@ -133,7 +188,7 @@ function Get-WiiLinkData {
         Add-WlLog 'ERROR' 'EXCEPTION' ("{0}: {1}" -f $_.Exception.GetType().FullName, $_.Exception.Message)
     } finally {
         $sw.Stop()
-        Add-WlLog 'INFO' 'END' ("Update finished; state={0}; elapsedMs={1}" -f $result.state, $sw.ElapsedMilliseconds)
+        Add-WlLog 'INFO' 'END' ("Update finished; state={0}; transport={1}; elapsedMs={2}" -f $result.state, $Transport, $sw.ElapsedMilliseconds)
     }
     return $result
 }
