@@ -1,4 +1,4 @@
-<#
+﻿<#
     WiiLinkSource.ps1 — WiiLink WFC の情報取得ライブラリ（UI 非依存）
 
     Get-WiiLinkData は stats + groups を取得し、正規化データと診断状態を返す。
