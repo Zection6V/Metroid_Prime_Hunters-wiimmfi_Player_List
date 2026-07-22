@@ -108,7 +108,7 @@ function Get-MphLogEntries {
         }
     }
 
-    return , @($result | Sort-Object `
+    @($result | Sort-Object `
             @{ Expression = { try { [datetime]$_.time } catch { [datetime]::MinValue } } }, `
             @{ Expression = { [string]$_.source } }, `
             @{ Expression = { [string]$_.stage } })
