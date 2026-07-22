@@ -30,7 +30,7 @@ function New-MphLogStore {
 
 function Write-MphLog {
     param(
-        $Store,
+        [AllowNull()]$Store,
         [ValidateSet('DEBUG', 'INFO', 'WARN', 'ERROR')][string]$Level = 'INFO',
         [string]$Stage = '',
         [Parameter(Mandatory = $true)][string]$Message,
@@ -51,7 +51,7 @@ function Write-MphLog {
 
 function Receive-MphLogEntries {
     param(
-        [Parameter(Mandatory = $true)]$Store,
+        [Parameter(Mandatory = $true)][AllowNull()]$Store,
         [int]$MaxDrain = 500
     )
     if ($null -eq $Store) { return 0 }
@@ -128,7 +128,7 @@ function Get-MphLogEntries {
 }
 
 function Clear-MphLogStore {
-    param([Parameter(Mandatory = $true)]$Store)
+    param([Parameter(Mandatory = $true)][AllowNull()]$Store)
     if ($null -eq $Store) { return }
     $queue = $Store.Queue
     $entries = $Store.Entries
