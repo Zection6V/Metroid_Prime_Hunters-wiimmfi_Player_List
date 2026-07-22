@@ -1,0 +1,140 @@
+name: Publish v2026.07.23
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/publish-release-v2026.07.23.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-v2026.07.23
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Create tag and GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = 'v2026.07.23';
+            const releaseName = 'v2026.07.23 — Multilingual UI and Diagnostics';
+            const targetCommitish = context.sha;
+
+            const body = [
+              '## 日本語',
+              '',
+              'Metroid Prime Hunters向けWiimmfi／WiiLinkプレイヤーリストの最新版です。',
+              '今回のリリースでは、多言語GUI、WiiLink取得方式の切替、ソース別診断ログ、取得した生データの詳細ログを追加しました。',
+              '',
+              '### 主な変更',
+              '',
+              '- GUIを日本語、英語、ドイツ語、フランス語、イタリア語、スペイン語に対応',
+              '- WindowsのUI言語を自動検出し、`MPH_LANG`による明示指定にも対応',
+              '- WiiLinkでDirect APIとChrome／Edge経由を実行中に切替可能',
+              '- 統合版で「すべて／Wiimmfi／WiiLink／アプリ」のログ表示切替に対応',
+              '- Wiimmfi単独版・WiiLink単独版にも共通診断ログUIを追加',
+              '- 詳細ログでWiiLinkの`stats.raw.json`／`groups.raw.json`を表示',
+              '- 詳細ログでWiimmfiの`wiimmfi.text.raw`を表示',
+              '- 大きなpayloadを分割し、サイズ・Content-Type・切り詰め状態を記録',
+              '- 空Queueが`$false`扱いされてログが一件も出ない不具合を修正',
+              '- ログ保存、payload整形、GUI表示、データ取得をSRPに沿って分離',
+              '- Windows PowerShell 5.1向けの構文・回帰・通信テストを拡充',
+              '',
+              '### 詳細ログ',
+              '',
+              '取得したJSON／text本文は通常ログには表示されません。ログパネルを展開し、「詳細」を有効にしてください。',
+              '',
+              'payloadは既定で1件あたり262,144文字まで記録します。上限は次の環境変数で変更できます。',
+              '',
+              '```powershell',
+              "$env:MPH_LOG_PAYLOAD_MAX_CHARS = '1000000'",
+              '```',
+              '',
+              '無制限にする場合:',
+              '',
+              '```powershell',
+              "$env:MPH_LOG_PAYLOAD_MAX_CHARS = '0'",
+              '```',
+              '',
+              '> 生payloadにはプレイヤー名、フレンドコード、PIDなどが含まれる場合があります。ログを外部共有する前に内容を確認してください。',
+              '',
+              '---',
+              '',
+              '## English',
+              '',
+              'This release adds multilingual UI support, selectable WiiLink transports, source-separated diagnostics, and raw response payload logging.',
+              '',
+              '### Highlights',
+              '',
+              '- Complete GUI localization for Japanese, English, German, French, Italian, and Spanish',
+              '- Automatic Windows UI-language detection with `MPH_LANG` override support',
+              '- Runtime selection between WiiLink Direct API and Chrome / Edge transport',
+              '- Combined or source-specific log views for Wiimmfi, WiiLink, and application events',
+              '- Shared diagnostic log UI in the unified and standalone viewers',
+              '- Raw WiiLink `stats` and `groups` JSON in detailed diagnostics',
+              '- Raw Wiimmfi `/text` response in detailed diagnostics',
+              '- Payload metadata, chunking, configurable limits, and explicit truncation warnings',
+              '- Fixed empty synchronized queues being mistaken for missing dependencies by PowerShell boolean evaluation',
+              '- SRP-oriented separation of log storage, payload formatting, data acquisition, and WinForms rendering',
+              '- Expanded deterministic regression and Windows PowerShell 5.1 validation',
+              '',
+              '### Running',
+              '',
+              '- `Run MPH Unified.bat` — Wiimmfi and WiiLink in one window',
+              '- `Run Wiimmfi Player List.bat` — Wiimmfi only',
+              '- `Run WiiLink Player List.bat` — WiiLink only',
+              '',
+              '> Raw payloads may contain player names, friend codes, PIDs, or other session data. Review copied logs before sharing them publicly.'
+            ].join('\n');
+
+            let tagExists = false;
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+              tagExists = true;
+              core.info(`Tag ${tag} already exists.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            if (!tagExists) {
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${tag}`,
+                sha: targetCommitish
+              });
+              core.info(`Created tag ${tag} at ${targetCommitish}.`);
+            }
+
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              core.info(`Release already exists: ${existing.data.html_url}`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const release = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              target_commitish: targetCommitish,
+              name: releaseName,
+              body,
+              draft: false,
+              prerelease: false,
+              make_latest: 'true'
+            });
+
+            core.notice(`Published release: ${release.data.html_url}`);
