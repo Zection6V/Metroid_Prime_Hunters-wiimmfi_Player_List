@@ -1,48 +1,154 @@
-# Metroid Prime Hunters - wiimmfi Player List
-A simple tool to see who is connected online and their gamemode/online status.
+# Metroid Prime Hunters - Wiimmfi / WiiLink Player List
 
-## How to run (no install needed)
+A Windows PowerShell viewer for checking Metroid Prime Hunters players, rooms, game modes, and online status on Wiimmfi and WiiLink WFC.
 
-Three viewers are provided. All use Windows' built-in PowerShell, so nothing
-extra needs to be installed. Each viewer lets you pick the polling interval
-(15s / 30s / 1m / 2m / 5m, default 30s — gentle on the servers), and has a
-**↻ Refresh** button for an immediate update without waiting for the next poll.
+## How to run
 
-The UI language follows Windows: **Japanese on a Japanese system, English otherwise**
-(override with the `MPH_LANG=ja|en` environment variable).
+No installation is required. Double-click one of the included launchers:
 
-| Double-click | Shows |
+| Launcher | Shows |
 |---|---|
-| **`Run MPH Unified.bat`** | Both servers side-by-side in one window |
+| **`Run MPH Unified.bat`** | Wiimmfi and WiiLink side-by-side |
 | **`Run Wiimmfi Player List.bat`** | Wiimmfi only |
 | **`Run WiiLink Player List.bat`** | WiiLink WFC only |
 
-- **Wiimmfi** (`wiimmfi.de`) is behind a Cloudflare JavaScript challenge, so it
-  requires **Chrome** or **Chromium-based Edge**: the tool drives a real browser
-  off-screen to pass the challenge, then reads the lightweight `/text` endpoint.
-- **WiiLink WFC** (`wfc.wiilink24.com`) needs **no browser** — it exposes a plain
-  JSON API. Rooms are shown as a tree (room → players); expand a node for details.
+The polling interval can be changed between 15 seconds, 30 seconds, 1 minute, 2 minutes, and 5 minutes. The default is 30 seconds. Use **Refresh** for an immediate update.
 
-> The original `MPH Wimmfi Player List.ahk` (AutoHotkey v1) used a plain HTTP GET,
-> which Cloudflare now blocks (403). The PowerShell viewers are the working ports.
+## Languages
 
-### Project layout (SRP)
+The GUI supports:
 
-```
-lib/WiimmfiSource.ps1   data fetch — Wiimmfi (browser/CDP + /text parsing)
-lib/WiiLinkSource.ps1   data fetch — WiiLink (JSON API)
-lib/TreeRender.ps1      presentation — shared TreeView rendering
-lib/ViewerCommon.ps1    UI parts — theme, top bar + interval, tree panel, poll worker
-lib/I18n.ps1            localization — ja/en strings (UI + status-code maps)
-MPH-Unified.ps1         viewer — both servers
-Wiimmfi-PlayerList.ps1  viewer — Wiimmfi only
-WiiLink-PlayerList.ps1  viewer — WiiLink only
+- Japanese
+- English
+- German
+- French
+- Italian
+- Spanish
+
+The Windows UI language is detected automatically. It can be overridden with:
+
+```cmd
+set MPH_LANG=ja
 ```
 
+Supported values are `ja`, `en`, `de`, `fr`, `it`, and `es`.
 
-Sample Images:
+## Server transports
 
-![alt text](https://i.postimg.cc/d0mcdcYR/Sample.png)
+### Wiimmfi
 
+Wiimmfi is protected by a Cloudflare JavaScript challenge. The viewer starts Chrome or Chromium-based Edge off-screen, passes the challenge, and reads the lightweight `/text` endpoint.
 
-![alt text](https://i.postimg.cc/vBYFt2YJ/Sample2.png)
+### WiiLink WFC
+
+WiiLink supports two selectable transports:
+
+- **Direct API** — requests the JSON API without opening a browser
+- **Chrome / Edge** — requests the same API through a browser session
+
+The browser transport is useful when local security software, TLS interception, or a network proxy blocks direct PowerShell requests.
+
+## WiiLink proxy support
+
+Direct API mode no longer disables the Windows proxy globally. With no configuration, it uses the following automatic fallback order:
+
+1. Direct connection
+2. `HTTPS_PROXY` or `HTTP_PROXY`, unless the host is covered by `NO_PROXY`
+3. Windows system proxy, including PAC/WPAD configurations
+
+The detailed diagnostic log records the route plan, each timeout or connection error, and the route that succeeded. Expand the log panel and enable **Details** to see entries with the `PROXY` stage.
+
+### Force a specific route
+
+Set `MPH_PROXY` before starting the viewer:
+
+```cmd
+rem Automatic fallback; this is the default
+set MPH_PROXY=auto
+
+rem Windows system proxy only
+set MPH_PROXY=system
+
+rem Direct connection only
+set MPH_PROXY=direct
+
+rem HTTPS_PROXY / HTTP_PROXY only
+set MPH_PROXY=environment
+
+rem Explicit proxy server
+set MPH_PROXY=http://proxy.example.com:8080
+```
+
+For an authenticated proxy, Windows credentials are used automatically. Explicit credentials can be supplied when required:
+
+```cmd
+set MPH_PROXY_USERNAME=username
+set MPH_PROXY_PASSWORD=password
+set MPH_PROXY_DOMAIN=DOMAIN
+```
+
+Do not include credentials when sharing diagnostic logs.
+
+### Timeout settings
+
+In automatic mode, the initial direct probe is intentionally short so a required proxy can be tried quickly.
+
+```cmd
+rem Direct probe; default 6 seconds
+set MPH_DIRECT_TIMEOUT_SEC=10
+
+rem Environment/system/custom proxy attempt; default 20 seconds
+set MPH_HTTP_TIMEOUT_SEC=30
+```
+
+When Direct API still fails, select **Chrome / Edge** in the WiiLink transport selector. Browsers often support enterprise PAC files and authentication mechanisms that are unavailable to PowerShell networking APIs.
+
+## Diagnostic logs
+
+The unified viewer can show:
+
+- All logs
+- Wiimmfi only
+- WiiLink only
+- Application events only
+
+Standalone viewers reuse the same diagnostic log component. Detailed logging also includes:
+
+- WiiLink `stats.raw.json`
+- WiiLink `groups.raw.json`
+- Wiimmfi `wiimmfi.text.raw`
+
+Raw payload logging is limited to 262,144 characters per response by default. Change the limit with:
+
+```cmd
+set MPH_LOG_PAYLOAD_MAX_CHARS=1000000
+```
+
+Use `0` for no limit. Raw payloads may contain player names, friend codes, PIDs, or other session data, so review copied logs before sharing them publicly.
+
+## Project layout
+
+```text
+program/lib/WiimmfiSource.ps1      Wiimmfi browser/CDP acquisition and parsing
+program/lib/WiiLinkSource.ps1      WiiLink transport orchestration and parsing
+program/lib/ProxyHttp.ps1          Direct/environment/system proxy routing and fallback
+program/lib/PayloadLog.ps1         Raw response metadata, chunking, and limits
+program/lib/LogStore.ps1           Source-separated diagnostic storage and filtering
+program/lib/DiagnosticLogView.ps1  WinForms diagnostic rendering
+program/lib/TreeRender.ps1         Shared player/room TreeView rendering
+program/lib/ViewerCommon.ps1       Shared theme, controls, and poll-worker utilities
+program/lib/I18n.ps1               GUI localization and status-code maps
+program/MPH-Unified.ps1            Combined viewer
+program/Wiimmfi-PlayerList.ps1     Wiimmfi-only viewer
+program/WiiLink-PlayerList.ps1     WiiLink-only viewer
+```
+
+## Legacy implementation
+
+The original `MPH Wimmfi Player List.ahk` used a plain HTTP request. Cloudflare now blocks that approach, so the PowerShell viewers are the maintained implementation.
+
+## Screenshots
+
+![Unified viewer](https://i.postimg.cc/d0mcdcYR/Sample.png)
+
+![Player details](https://i.postimg.cc/vBYFt2YJ/Sample2.png)
