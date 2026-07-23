@@ -56,22 +56,23 @@ function Test-MphNoProxyMatch {
     )
 
     if ([string]::IsNullOrWhiteSpace($NoProxy)) { return $false }
-    $host = $TargetUri.DnsSafeHost.ToLowerInvariant()
-    $hostPort = ('{0}:{1}' -f $host, $TargetUri.Port)
+    # $Host はPowerShell組み込みの読み取り専用変数なので、ローカル変数名に使用しない。
+    $targetHost = $TargetUri.DnsSafeHost.ToLowerInvariant()
+    $targetHostPort = ('{0}:{1}' -f $targetHost, $TargetUri.Port)
 
     foreach ($rawRule in ($NoProxy -split ',')) {
         $rule = $rawRule.Trim().ToLowerInvariant()
         if ([string]::IsNullOrWhiteSpace($rule)) { continue }
         if ($rule -eq '*') { return $true }
-        if ($rule -eq $host -or $rule -eq $hostPort) { return $true }
+        if ($rule -eq $targetHost -or $rule -eq $targetHostPort) { return $true }
 
         $ruleHost = $rule
         $colon = $rule.LastIndexOf(':')
         if ($colon -gt 0 -and $rule.IndexOf(']') -lt 0) { $ruleHost = $rule.Substring(0, $colon) }
         if ($ruleHost.StartsWith('.')) {
             $suffix = $ruleHost.Substring(1)
-            if ($host -eq $suffix -or $host.EndsWith('.' + $suffix, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
-        } elseif ($host.EndsWith('.' + $ruleHost, [System.StringComparison]::OrdinalIgnoreCase)) {
+            if ($targetHost -eq $suffix -or $targetHost.EndsWith('.' + $suffix, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        } elseif ($targetHost.EndsWith('.' + $ruleHost, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
     }
@@ -153,12 +154,21 @@ function Get-MphProxyAttemptPlan {
 }
 
 function Get-MphProxyCredentials {
+    param([AllowNull()][uri]$ProxyUri = $null)
+
     $username = [string]$env:MPH_PROXY_USERNAME
-    if ([string]::IsNullOrWhiteSpace($username)) { return [System.Net.CredentialCache]::DefaultNetworkCredentials }
     $password = [string]$env:MPH_PROXY_PASSWORD
     $domain = [string]$env:MPH_PROXY_DOMAIN
-    if ([string]::IsNullOrWhiteSpace($domain)) { return New-Object System.Net.NetworkCredential($username, $password) }
-    return New-Object System.Net.NetworkCredential($username, $password, $domain)
+
+    if ([string]::IsNullOrWhiteSpace($username) -and $null -ne $ProxyUri -and -not [string]::IsNullOrWhiteSpace($ProxyUri.UserInfo)) {
+        $parts = $ProxyUri.UserInfo -split ':', 2
+        $username = [uri]::UnescapeDataString($parts[0])
+        if ($parts.Count -gt 1) { $password = [uri]::UnescapeDataString($parts[1]) }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($username)) { return [System.Net.CredentialCache]::DefaultNetworkCredentials }
+    if ([string]::IsNullOrWhiteSpace($domain)) { return [System.Net.NetworkCredential]::new($username, $password) }
+    return [System.Net.NetworkCredential]::new($username, $password, $domain)
 }
 
 function Write-MphHttpDiagnostic {
@@ -177,6 +187,21 @@ function Write-MphHttpDiagnostic {
     } catch {}
 }
 
+function New-MphAttemptProxy {
+    param([Parameter(Mandatory = $true)]$Attempt)
+
+    if ([string]$Attempt.Mode -eq 'system') {
+        $proxy = [System.Net.WebRequest]::GetSystemWebProxy()
+        $credentials = Get-MphProxyCredentials
+    } else {
+        $proxyUri = [uri]$Attempt.ProxyUri
+        $proxy = [System.Net.WebProxy]::new($proxyUri, $true)
+        $credentials = Get-MphProxyCredentials -ProxyUri $proxyUri
+    }
+    try { $proxy.Credentials = $credentials } catch {}
+    return [pscustomobject]@{ Proxy = $proxy; Credentials = $credentials }
+}
+
 function Invoke-MphProxyHttpAttempt {
     param(
         [Parameter(Mandatory = $true)][uri]$Url,
@@ -189,7 +214,7 @@ function Invoke-MphProxyHttpAttempt {
     $request = $null
     $response = $null
     try {
-        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler = [System.Net.Http.HttpClientHandler]::new()
         $handler.AllowAutoRedirect = $true
         $handler.UseCookies = $false
         $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
@@ -198,24 +223,18 @@ function Invoke-MphProxyHttpAttempt {
             $handler.UseProxy = $false
         } else {
             $handler.UseProxy = $true
-            $proxy = if ([string]$Attempt.Mode -eq 'system') {
-                [System.Net.WebRequest]::GetSystemWebProxy()
-            } else {
-                New-Object System.Net.WebProxy([uri]$Attempt.ProxyUri, $true)
-            }
-            $credentials = Get-MphProxyCredentials
-            try { $proxy.Credentials = $credentials } catch {}
-            $handler.Proxy = $proxy
+            $proxyContext = New-MphAttemptProxy -Attempt $Attempt
+            $handler.Proxy = $proxyContext.Proxy
             try {
                 if ($null -ne $handler.PSObject.Properties['DefaultProxyCredentials']) {
-                    $handler.DefaultProxyCredentials = $credentials
+                    $handler.DefaultProxyCredentials = $proxyContext.Credentials
                 }
             } catch {}
         }
 
-        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client = [System.Net.Http.HttpClient]::new($handler)
         $client.Timeout = [TimeSpan]::FromSeconds([int]$Attempt.TimeoutSec)
-        $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $Url)
+        $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $Url)
         foreach ($header in $Headers.GetEnumerator()) {
             [void]$request.Headers.TryAddWithoutValidation([string]$header.Key, [string]$header.Value)
         }
@@ -229,7 +248,12 @@ function Invoke-MphProxyHttpAttempt {
         }
 
         $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
-        $text = [Text.Encoding]::UTF8.GetString($bytes)
+        $encoding = [Text.Encoding]::UTF8
+        try {
+            $charset = [string]$response.Content.Headers.ContentType.CharSet
+            if (-not [string]::IsNullOrWhiteSpace($charset)) { $encoding = [Text.Encoding]::GetEncoding($charset.Trim('"')) }
+        } catch {}
+        $text = $encoding.GetString($bytes)
         $status = [int]$response.StatusCode
         $contentType = if ($null -ne $response.Content.Headers.ContentType) { [string]$response.Content.Headers.ContentType } else { '' }
         if (-not $response.IsSuccessStatusCode) {
