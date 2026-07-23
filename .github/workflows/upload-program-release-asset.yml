@@ -1,5 +1,5 @@
 name: Upload program ZIP to Release Assets
-# Package layout: contents of program/ at ZIP root; validates browser fallback and stats-only display before upload.
+# Validation revision: browser-fallback-positional-stage; program contents remain at ZIP root.
 
 on:
   push:
