@@ -83,7 +83,19 @@ function Update-WiiLinkTree {
     $selKey = if ($Tree.SelectedNode -and $Tree.SelectedNode.Tag) { $Tree.SelectedNode.Tag.Key } else { $null }
     $Tree.BeginUpdate(); $Tree.Nodes.Clear()
     $rooms = @($d.rooms)
-    if ($rooms.Count -eq 0) { (Add-TreeChild $Tree $I18n.nobody $Colors.dim) | Out-Null }
+    if ($rooms.Count -eq 0) {
+        $statsOnline = [int]$d.stats.online
+        $statsActive = [int]$d.stats.active
+        $statsGroups = [int]$d.stats.groups
+        if ($statsOnline -gt 0 -or $statsActive -gt 0 -or $statsGroups -gt 0) {
+            # groups=0 でも stats に対象ゲームが存在する場合、オンライン情報を消さない。
+            $statsNode = $Tree.Nodes.Add(("{0}: {1}   {2}: {3}   {4}: {5}" -f $I18n.wlOn, $statsOnline, $I18n.wlAct, $statsActive, $I18n.wlGrp, $statsGroups))
+            $statsNode.ForeColor = $Colors.green
+            $statsNode.Tag = @{ Key = 'wl-stats' }
+        } else {
+            (Add-TreeChild $Tree $I18n.nobody $Colors.dim) | Out-Null
+        }
+    }
     else {
         foreach ($g in $rooms) {
             $rp = @($g.players)
