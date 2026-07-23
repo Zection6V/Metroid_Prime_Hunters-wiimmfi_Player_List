@@ -7,19 +7,12 @@
 #>
 
 . (Join-Path $PSScriptRoot 'I18n.ps1')
+. (Join-Path $PSScriptRoot 'PayloadLog.ps1')
+. (Join-Path $PSScriptRoot 'ProxyHttp.ps1')
 . (Join-Path $PSScriptRoot 'WiimmfiSource.ps1')
 
 try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12 } catch {}
 try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls13 } catch {}
-
-# プロキシ自動検出(WPAD)が原因で HTTP がハング→タイムアウトする環境があるため、既定では
-# プロキシを使わず直結する。プロキシが必要な場合は環境変数 MPH_PROXY を設定:
-#   MPH_PROXY=system            … Windows のシステムプロキシ設定を使う
-#   MPH_PROXY=http://host:port  … 指定プロキシを使う
-try {
-    if (-not $env:MPH_PROXY) { [System.Net.WebRequest]::DefaultWebProxy = $null }
-    elseif ($env:MPH_PROXY -ne 'system') { [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy($env:MPH_PROXY, $true) }
-} catch {}
 
 function Write-WiiLinkDiagnostic {
     param(
@@ -41,6 +34,18 @@ function Write-WiiLinkDiagnostic {
     } catch {}
 }
 
+function Get-WiiLinkProxySettingLabel {
+    $raw = ([string]$env:MPH_PROXY).Trim()
+    if ([string]::IsNullOrWhiteSpace($raw)) { return 'auto' }
+    $normalized = $raw.ToLowerInvariant()
+    if ($normalized -in @('auto', 'direct', 'none', 'off', 'environment', 'env', 'system')) { return $normalized }
+    $uri = $null
+    if ([uri]::TryCreate($raw, [UriKind]::Absolute, [ref]$uri)) {
+        return ('custom:{0}' -f (Get-MphSafeProxyLabel -ProxyUri $uri))
+    }
+    return 'invalid'
+}
+
 function Start-WiiLinkBrowser {
     param(
         [string]$Url = 'https://api.wfc.wiilink24.com/api/stats',
@@ -53,7 +58,7 @@ function Start-WiiLinkBrowser {
         return @{ ok = $false; error = 'no-browser' }
     }
     $port = Get-FreePort
-    $profile = Join-Path $env:TEMP ("mph_wiilink_profile_{0}" -f $PID)
+    $profile = Join-Path $env:TEMP ("mph_wiilink_profile_{0}_{1}" -f $PID, $port)
     $args = @(
         "--remote-debugging-port=$port", "--user-data-dir=`"$profile`"",
         '--no-first-run', '--no-default-browser-check', '--disable-background-timer-throttling',
@@ -96,7 +101,11 @@ function Get-WiiLinkBrowserText {
         $msg = if ($envelope.error) { [string]$envelope.error } else { "HTTP $([int]$envelope.status)" }
         throw ("browser-fetch-failed: {0}" -f $msg)
     }
-    return @{ text = [string]$envelope.body; status = [int]$envelope.status; bytes = [Text.Encoding]::UTF8.GetByteCount([string]$envelope.body); contentType = 'application/json (browser fetch)' }
+    return @{
+        text = [string]$envelope.body; status = [int]$envelope.status
+        bytes = [Text.Encoding]::UTF8.GetByteCount([string]$envelope.body)
+        contentType = 'application/json (browser fetch)'; route = 'browser'; proxy = ''; timeoutSec = $TimeoutSec
+    }
 }
 
 function Get-WiiLinkPayload {
@@ -104,16 +113,22 @@ function Get-WiiLinkPayload {
         [ValidateSet('direct', 'browser')][string]$Transport,
         [string]$Url,
         [string]$Ua,
-        [int]$BrowserPort = 0
+        [int]$BrowserPort = 0,
+        $LogQueue = $null
     )
     if ($Transport -eq 'browser') {
         if ($BrowserPort -le 0) { throw 'browser-port-not-set' }
         return Get-WiiLinkBrowserText -Port $BrowserPort -Url $Url
     }
-    $h = @{ 'User-Agent' = $Ua; 'Accept' = 'application/json'; 'Accept-Encoding' = 'identity'; 'Cache-Control' = 'no-cache'; 'Pragma' = 'no-cache' }
-    $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 15 -Headers $h
-    $bytes = $r.RawContentStream.ToArray()
-    return @{ text = [Text.Encoding]::UTF8.GetString($bytes); status = [int]$r.StatusCode; bytes = $bytes.Length; contentType = [string]$r.Headers['Content-Type'] }
+
+    $headers = @{
+        'User-Agent' = $Ua
+        'Accept' = 'application/json'
+        'Accept-Encoding' = 'identity'
+        'Cache-Control' = 'no-cache'
+        'Pragma' = 'no-cache'
+    }
+    return Invoke-MphProxyHttpText -Url ([uri]$Url) -Headers $headers -LogQueue $LogQueue -Source 'WiiLink'
 }
 
 function Get-WiiLinkData {
@@ -131,28 +146,34 @@ function Get-WiiLinkData {
     $result = @{
         ok = $false; state = 'error'; error = ''; transport = $Transport
         stats = @{ online = 0; active = 0; groups = 0 }
-        rooms = @(); diagnostics = @{ availableGames = @(); matchedGroups = 0; players = 0 }
+        rooms = @()
+        diagnostics = @{
+            availableGames = @(); matchedGroups = 0; players = 0
+            proxySetting = (Get-WiiLinkProxySettingLabel); statsRoute = ''; groupsRoute = ''
+        }
     }
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
     Write-WiiLinkDiagnostic $LogQueue 'INFO' 'START' ("Update started; game={0}; transport={1}" -f $Game, $Transport)
-    Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'ENV' ("PowerShell={0}; OS={1}; TLS={2}; browserPort={3}" -f $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString, [Net.ServicePointManager]::SecurityProtocol, $BrowserPort)
+    Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'ENV' ("PowerShell={0}; OS={1}; TLS={2}; browserPort={3}; proxySetting={4}" -f $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString, [Net.ServicePointManager]::SecurityProtocol, $BrowserPort, $result.diagnostics.proxySetting)
 
     try {
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("Requesting stats API via {0}" -f $Transport)
         $watch = [Diagnostics.Stopwatch]::StartNew()
-        $statsPayload = Get-WiiLinkPayload -Transport $Transport -Url $StatsUrl -Ua $Ua -BrowserPort $BrowserPort
+        $statsPayload = Get-WiiLinkPayload -Transport $Transport -Url $StatsUrl -Ua $Ua -BrowserPort $BrowserPort -LogQueue $LogQueue
         $watch.Stop()
-        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("stats completed; transport={0}; HTTP={1}; bytes={2}; elapsedMs={3}" -f $Transport, $statsPayload.status, $statsPayload.bytes, $watch.ElapsedMilliseconds)
-        Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'HTTP' ("stats Content-Type={0}" -f $statsPayload.contentType)
+        $result.diagnostics.statsRoute = [string]$statsPayload.route
+        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("stats completed; transport={0}; route={1}; HTTP={2}; bytes={3}; elapsedMs={4}" -f $Transport, $statsPayload.route, $statsPayload.status, $statsPayload.bytes, $watch.ElapsedMilliseconds)
+        Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'HTTP' ("stats Content-Type={0}; proxy={1}; timeoutSec={2}" -f $statsPayload.contentType, $statsPayload.proxy, $statsPayload.timeoutSec)
         Write-MphPayloadLog -LogQueue $LogQueue -Source 'WiiLink' -Name 'stats.raw.json' -Content $statsPayload.text -ContentType $statsPayload.contentType
 
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("Requesting groups API via {0}" -f $Transport)
         $watch = [Diagnostics.Stopwatch]::StartNew()
-        $groupsPayload = Get-WiiLinkPayload -Transport $Transport -Url $GroupsUrl -Ua $Ua -BrowserPort $BrowserPort
+        $groupsPayload = Get-WiiLinkPayload -Transport $Transport -Url $GroupsUrl -Ua $Ua -BrowserPort $BrowserPort -LogQueue $LogQueue
         $watch.Stop()
-        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("groups completed; transport={0}; HTTP={1}; bytes={2}; elapsedMs={3}" -f $Transport, $groupsPayload.status, $groupsPayload.bytes, $watch.ElapsedMilliseconds)
-        Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'HTTP' ("groups Content-Type={0}" -f $groupsPayload.contentType)
+        $result.diagnostics.groupsRoute = [string]$groupsPayload.route
+        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("groups completed; transport={0}; route={1}; HTTP={2}; bytes={3}; elapsedMs={4}" -f $Transport, $groupsPayload.route, $groupsPayload.status, $groupsPayload.bytes, $watch.ElapsedMilliseconds)
+        Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'HTTP' ("groups Content-Type={0}; proxy={1}; timeoutSec={2}" -f $groupsPayload.contentType, $groupsPayload.proxy, $groupsPayload.timeoutSec)
         Write-MphPayloadLog -LogQueue $LogQueue -Source 'WiiLink' -Name 'groups.raw.json' -Content $groupsPayload.text -ContentType $groupsPayload.contentType
 
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'JSON' 'Parsing stats JSON'
