@@ -43,10 +43,17 @@ Wiimmfi is protected by a Cloudflare JavaScript challenge. The viewer starts Chr
 
 WiiLink supports two selectable transports:
 
-- **Direct API** — requests the JSON API without opening a browser
-- **Chrome / Edge** — requests the same API through a browser session
+- **Chrome / Edge** — the default; requests the API through a browser session
+- **Direct API** — optional manual mode; requests the JSON API without opening a browser
 
 The browser transport is useful when local security software, TLS interception, or a network proxy blocks direct PowerShell requests.
+
+Both WiiLink requests are restricted to Metroid Prime Hunters with `?game=mprimeds`:
+
+- `https://api.wfc.wiilink24.com/api/stats?game=mprimeds`
+- `https://api.wfc.wiilink24.com/api/groups?game=mprimeds`
+
+WiiLink only exposes a room in the room list when at least two players are present. Therefore, the online count can be greater than zero while no room row is available. The viewer also displays this rule directly above the WiiLink room list.
 
 ## WiiLink proxy support
 
@@ -101,7 +108,7 @@ rem Environment/system/custom proxy attempt; default 20 seconds
 set MPH_HTTP_TIMEOUT_SEC=30
 ```
 
-When Direct API still fails, select **Chrome / Edge** in the WiiLink transport selector. Browsers often support enterprise PAC files and authentication mechanisms that are unavailable to PowerShell networking APIs.
+When Direct API still fails, use the default **Chrome / Edge** transport. Browsers often support enterprise PAC files and authentication mechanisms that are unavailable to PowerShell networking APIs.
 
 ## Diagnostic logs
 
@@ -112,7 +119,9 @@ The unified viewer can show:
 - WiiLink only
 - Application events only
 
-Standalone viewers reuse the same diagnostic log component. Detailed logging also includes:
+Standalone viewers reuse the same diagnostic log component. Normal updates append only newly received entries instead of clearing and rebuilding the entire log. Auto-scroll moves from the currently rendered content to the latest entry, reducing flicker. When auto-scroll is disabled, the current position is preserved.
+
+Detailed logging also includes:
 
 - WiiLink `stats.raw.json`
 - WiiLink `groups.raw.json`
