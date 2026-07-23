@@ -1,0 +1,23 @@
+{
+  "published": false,
+  "immutable": true,
+  "tag": "v2026.07.23.5",
+  "name": "v2026.07.23.5 — Unambiguous WiiLink Room Visibility Note",
+  "targetCommit": "c4f8b6f5f894fc732e3c46f2cf96b08265099ea8",
+  "outcomes": {
+    "validation": "success",
+    "package": "not-run",
+    "release": "not-run"
+  },
+  "features": {
+    "roomVisibilityWording": "each-room-contains-at-least-two-players"
+  },
+  "failureLogsBase64": {
+    "validation": null,
+    "package": null,
+    "release": null
+  },
+  "release": null,
+  "asset": null,
+  "verifiedAt": "2026-07-23T05:19:19.902Z"
+}
