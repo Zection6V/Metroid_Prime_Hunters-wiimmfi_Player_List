@@ -1,4 +1,5 @@
 name: Publish v2026.07.23.1
+# Validation revision: payload-newline-and-strictmode-fixes
 
 on:
   push:
