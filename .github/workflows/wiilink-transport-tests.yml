@@ -30,8 +30,24 @@ jobs:
         run: |
           .\program\tests\Test-ProxyHttp.ps1
 
-  payload-logging:
+  wiilink-group-parsing:
     needs: proxy-http
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test empty, array, wrapper, and mapped groups responses
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-WiiLinkGroupParsing.ps1
+
+  payload-logging:
+    needs: wiilink-group-parsing
     runs-on: windows-latest
     timeout-minutes: 5
 
