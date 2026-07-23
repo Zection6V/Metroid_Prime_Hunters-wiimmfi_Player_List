@@ -1,5 +1,5 @@
 name: Publish v2026.07.23.4
-# Trigger revision 2: avoid the read-only PowerShell $Error variable.
+# Trigger revision 4: localization syntax fixed; run against this workflow HEAD.
 
 on:
   push:
