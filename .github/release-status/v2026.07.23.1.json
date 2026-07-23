@@ -19,10 +19,11 @@
   "uploadOutcome": "success",
   "asset": {
     "uploaded": true,
-    "id": 486602333,
+    "id": 486605373,
     "name": "Metroid_Prime_Hunters-wiimmfi_Player_List.zip",
-    "size": 49734,
-    "sha256": "e4db88399e6af34def6125fc6095f0786446f2ec49f9aa2b53206a761b7bb542",
+    "size": 49398,
+    "sha256": "8571549412310d76f815358e762978e23ab8b18427b68b80ad62aa4161785087",
+    "layout": "program-contents-at-zip-root",
     "downloadUrl": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/download/v2026.07.23.1/Metroid_Prime_Hunters-wiimmfi_Player_List.zip"
   },
   "failureLogs": {
@@ -33,5 +34,5 @@
     "transports": null
   },
   "verifiedAt": "2026-07-23T01:01:20.648Z",
-  "assetVerifiedAt": "2026-07-23T01:04:56.832Z"
+  "assetVerifiedAt": "2026-07-23T01:10:01.525Z"
 }
