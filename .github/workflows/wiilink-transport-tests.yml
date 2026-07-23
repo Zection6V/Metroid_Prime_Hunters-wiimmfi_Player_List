@@ -56,12 +56,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Test empty, array, wrapper, and mapped groups responses
+      - name: Test groups response shapes and game-filtered endpoints
         shell: powershell
         env:
           MPH_LANG: en
         run: |
           .\program\tests\Test-WiiLinkGroupParsing.ps1
+          .\program\tests\Test-WiiLinkGameFilter.ps1
 
   wiilink-stats-only-display:
     needs: wiilink-group-parsing
@@ -104,12 +105,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Test empty Queue logging and source emitters
+      - name: Test log storage and incremental rendering
         shell: powershell
         env:
           MPH_LANG: en
         run: |
           .\program\tests\Test-LoggingCore.ps1
+          .\program\tests\Test-DiagnosticLogIncremental.ps1
 
   test-wiilink-transports:
     needs: logging-core
