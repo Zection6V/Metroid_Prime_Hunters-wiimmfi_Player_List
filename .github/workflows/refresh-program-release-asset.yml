@@ -1,0 +1,31 @@
+name: Refresh program Release Asset
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'program/**'
+      - '.github/workflows/refresh-program-release-asset.yml'
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch-release-asset-refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch verified program ZIP upload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'upload-program-release-asset.yml',
+              ref: 'master',
+              inputs: {
+                tag: 'v2026.07.23.1',
+                ref: 'master'
+              }
+            });
+            core.notice('Dispatched verified Release Asset refresh for v2026.07.23.1.');
