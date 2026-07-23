@@ -3,14 +3,23 @@
   "immutable": true,
   "tag": "v2026.07.23.2",
   "name": "v2026.07.23.2 — Direct API Network Diagnostics",
-  "targetCommit": "a40e7ecc01300c90108e28d4075d188c0ec092c4",
-  "outcomes": {
-    "syntax": "success",
-    "tests": "failure",
-    "package": "skipped",
-    "release": "skipped"
+  "targetCommit": "f8b8e1b1b6edcf42c8f842c54a86d243391697b5",
+  "syntax": "success",
+  "tests": {
+    "proxy": "success",
+    "browserFallback": "success",
+    "groupsParsing": "success",
+    "statsOnlyDisplay": "success",
+    "networkDiagnostics": "failure",
+    "payloadLogging": "success",
+    "loggingCore": "success"
   },
+  "failureLogs": {
+    "networkDiagnostics": "Message: The term '.\\program\\tests\\Test-NetworkDiagnostics.ps1' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.\r\nType: System.Management.Automation.CommandNotFoundException\r\nPosition: At D:\\a\\_temp\\baddedba-69a0-4172-a75b-e19c26f3a613.ps1:22 char:7\r\n+     & $path *>&1 | ForEach-Object {\r\n+       ~~~~~\r\nScriptStackTrace: at <ScriptBlock>, D:\\a\\_temp\\baddedba-69a0-4172-a75b-e19c26f3a613.ps1: line 22\r\nat <ScriptBlock>, <No file>: line 1\r\nFullError: \r\n\r\nPSMessageDetails      : \r\nException             : System.Management.Automation.CommandNotFoundException: The term \r\n                        '.\\program\\tests\\Test-NetworkDiagnostics.ps1' is not recognized as the name of a cmdlet, \r\n                        function, script file, or operable program. Check the spelling of the name, or if a path was \r\n                        included, verify that the path is correct and try again.\r\n                           at System.Management.Automation.ExceptionHandlingOps.CheckActionPreference(FunctionContext \r\n                        funcContext, Exception exception)\r\n                           at System.Management.Automation.Interpreter.ActionCallInstruction`2.Run(InterpretedFrame \r\n                        frame)\r\n                           at \r\n                        System.Management.Automation.Interpreter.EnterTryCatchFinallyInstruction.Run(InterpretedFrame \r\n                        frame)\r\n                           at \r\n                        System.Management.Automation.Interpreter.EnterTryCatchFinallyInstruction.Run(InterpretedFrame \r\n                        frame)\r\nTargetObject          : .\\program\\tests\\Test-NetworkDiagnostics.ps1\r\nCategoryInfo          : ObjectNotFound: (.\\program\\tests...Diagnostics.ps1:String) [], CommandNotFoundException\r\nFullyQualifiedErrorId : CommandNotFoundException\r\nErrorDetails          : \r\nInvocationInfo        : System.Management.Automation.InvocationInfo\r\nScriptStackTrace      : at <ScriptBlock>, D:\\a\\_temp\\baddedba-69a0-4172-a75b-e19c26f3a613.ps1: line 22\r\n                        at <ScriptBlock>, <No file>: line 1\r\nPipelineIterationInfo : {}\r\n\r\n\r\n\r\n\r\n"
+  },
+  "packageOutcome": "skipped",
+  "releaseOutcome": "skipped",
   "release": null,
   "asset": null,
-  "verifiedAt": "2026-07-23T02:49:08.813Z"
+  "verifiedAt": "2026-07-23T02:51:32.114Z"
 }
