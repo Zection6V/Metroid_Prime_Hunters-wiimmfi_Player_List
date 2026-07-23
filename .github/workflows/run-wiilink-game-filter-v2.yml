@@ -1,0 +1,23 @@
+name: Run WiiLink game filter v2
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/run-wiilink-game-filter-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Apply
+        shell: powershell
+        run: Write-Host 'Runner installed; waiting for trigger revision.'
