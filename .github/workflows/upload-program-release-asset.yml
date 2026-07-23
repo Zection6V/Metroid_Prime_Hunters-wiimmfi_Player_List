@@ -1,5 +1,5 @@
 name: Upload program ZIP to Release Assets
-# Package layout: contents of program/ at ZIP root; validates ASCII-safe stats-only WiiLink display before upload.
+# Package layout: contents of program/ at ZIP root; validates browser fallback and stats-only display before upload.
 
 on:
   push:
@@ -39,6 +39,14 @@ jobs:
         with:
           ref: ${{ env.TARGET_REF }}
 
+      - name: Test automatic WiiLink browser fallback
+        id: browser_fallback_test
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-WiiLinkBrowserFallback.ps1 -LogPath "$env:GITHUB_WORKSPACE\browser-fallback-test.log"
+
       - name: Test stats-only WiiLink display
         id: stats_only_test
         shell: powershell
@@ -49,7 +57,9 @@ jobs:
 
       - name: Package and verify program contents at ZIP root
         id: package
-        if: steps.stats_only_test.outputs.result == 'success'
+        if: >-
+          steps.browser_fallback_test.outputs.result == 'success' &&
+          steps.stats_only_test.outputs.result == 'success'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -142,10 +152,11 @@ jobs:
             core.setOutput('asset_size', String(uploaded.size));
             core.notice(`Uploaded ${uploaded.name}: ${uploaded.browser_download_url}`);
 
-      - name: Record stats-only test and Release Asset result
+      - name: Record fallback, display, and Release Asset result
         if: always()
         uses: actions/github-script@v7
         env:
+          BROWSER_FALLBACK_RESULT: ${{ steps.browser_fallback_test.outputs.result }}
           STATS_ONLY_RESULT: ${{ steps.stats_only_test.outputs.result }}
           PACKAGE_OUTCOME: ${{ steps.package.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
@@ -170,11 +181,12 @@ jobs:
               if (error.status !== 404) throw error;
             }
 
-            let failureLog = null;
-            if (process.env.STATS_ONLY_RESULT !== 'success') {
-              const logPath = `${process.env.GITHUB_WORKSPACE}\\stats-only-display-test.log`;
-              failureLog = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : 'Test log was not created.';
-              if (failureLog.length > 16000) failureLog = failureLog.slice(-16000);
+            function readFailure(result, filename) {
+              if (result === 'success') return null;
+              const logPath = `${process.env.GITHUB_WORKSPACE}\\${filename}`;
+              let text = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : 'Test log was not created.';
+              if (text.length > 16000) text = text.slice(-16000);
+              return text;
             }
 
             const uploadSucceeded = process.env.UPLOAD_OUTCOME === 'success' && Boolean(asset);
@@ -187,8 +199,10 @@ jobs:
               releaseId: release.id,
               draft: release.draft,
               prerelease: release.prerelease,
+              browserFallbackTest: process.env.BROWSER_FALLBACK_RESULT || 'unknown',
+              browserFallbackFailureLog: readFailure(process.env.BROWSER_FALLBACK_RESULT, 'browser-fallback-test.log'),
               statsOnlyDisplayTest: process.env.STATS_ONLY_RESULT || 'unknown',
-              statsOnlyDisplayFailureLog: failureLog,
+              statsOnlyDisplayFailureLog: readFailure(process.env.STATS_ONLY_RESULT, 'stats-only-display-test.log'),
               packageOutcome: process.env.PACKAGE_OUTCOME,
               uploadOutcome: process.env.UPLOAD_OUTCOME,
               asset: uploadSucceeded ? {
@@ -207,7 +221,7 @@ jobs:
               owner,
               repo,
               path: statusPath,
-              message: `Record ${tag} stats-only display asset result`,
+              message: `Record ${tag} browser fallback asset result`,
               content: Buffer.from(JSON.stringify(status, null, 2) + '\n').toString('base64'),
               sha: statusSha,
               branch: 'master'
