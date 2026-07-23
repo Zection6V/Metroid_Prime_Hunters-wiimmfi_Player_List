@@ -71,7 +71,7 @@ function Test-WiiLinkBrowserFallbackRequired {
             Write-WiiLinkFallbackNetDiag -LogQueue $LogQueue -Level ERROR -Message 'Detailed diagnostics unavailable; Invoke-MphNetworkDiagnostics was not loaded.'
         } else {
             Write-WiiLinkFallbackNetDiag -LogQueue $LogQueue -Level INFO -Message 'Running detailed Direct API diagnostics before Chrome/Edge fallback.'
-            Invoke-MphNetworkDiagnostics -Url ([uri]'https://api.wfc.wiilink24.com/api/stats') -LogQueue $LogQueue -Source 'WiiLink' -TriggerError $errorText | Out-Null
+            Invoke-MphNetworkDiagnostics -Url ([uri]'https://api.wfc.wiilink24.com/api/stats?game=mprimeds') -LogQueue $LogQueue -Source 'WiiLink' -TriggerError $errorText | Out-Null
             Write-WiiLinkFallbackNetDiag -LogQueue $LogQueue -Level INFO -Message 'Detailed Direct API diagnostics completed; continuing with Chrome/Edge fallback.'
         }
     } catch {
