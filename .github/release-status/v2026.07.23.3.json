@@ -3,17 +3,17 @@
   "immutable": true,
   "tag": "v2026.07.23.3",
   "name": "v2026.07.23.3 — Reliable Direct API NETDIAG",
-  "targetCommit": "fed38f1caa41fa7e0b78602d947f5fe43247313c",
+  "targetCommit": "11f54977d7486b451cbb1cd48b0206399f09b544",
   "outcomes": {
-    "validation": "failure",
-    "package": "not-run",
-    "release": "skipped"
+    "validation": "success",
+    "package": "success",
+    "release": "failure"
   },
   "failureLogs": {
-    "validation": "PowerShell syntax: success\r\n=== .\\program\\tests\\Test-ProxyHttp.ps1 ===\r\n== Global proxy isolation ==\r\n== Auto route plan ==\r\n== Environment proxy and NO_PROXY ==\r\n== Explicit proxy modes ==\r\n== Timeout fallback behavior ==\r\n== Explicit direct does not fallback ==\r\n== Timeout settings ==\r\nRESULT: SUCCESS\r\n=== .\\program\\tests\\Test-WiiLinkBrowserFallback.ps1 ===\r\n== Route exhaustion triggers browser fallback ==\r\n== Successful direct request stays direct ==\r\n== Non-network errors stay on selected transport ==\r\n== UI transport mapping ==\r\n== Deterministic Direct API diagnostics ==\r\n== Viewer integration surface ==\r\nRESULT: SUCCESS\r\n=== .\\program\\tests\\Test-WiiLinkFallbackCapturedQueue.ps1 ===\r\n== Standalone worker Queue capture ==\r\n== Unified worker Queue capture ==\r\nMessage: ASSERT FAILED: Unified WiiLink Queue must be captured when the fallback module is loaded.\r\nType: System.Management.Automation.RuntimeException\r\nPosition: At D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Player_List\\program\\tests\\Test-WiiLinkFallbackCapturedQueue.ps1:8 char:28\r\n+     if (-not $Condition) { throw \"ASSERT FAILED: $Message\" }\r\n+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\nScriptStackTrace: at Assert-True, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Player_List\\program\\tests\\Test-WiiLinkFallbackCapturedQueue.ps1: line 8\r\nat <ScriptBlock>, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Player_List\\program\\tests\\Test-WiiLinkFallbackCapturedQueue.ps1: line 57\r\nat <ScriptBlock>, D:\\a\\_temp\\c68dcba4-2a1a-47fd-859b-e7b8e30a5f89.ps1: line 28\r\nat <ScriptBlock>, <No file>: line 1\r\n\r\n\r\nPSMessageDetails      : \r\nException             : System.Management.Automation.RuntimeException: ASSERT FAILED: Unified WiiLink Queue must be \r\n                        captured when the fallback module is loaded.\r\nTargetObject          : ASSERT FAILED: Unified WiiLink Queue must be captured when the fallback module is loaded.\r\nCategoryInfo          : OperationStopped: (ASSERT FAILED: ...dule is loaded.:String) [], RuntimeException\r\nFullyQualifiedErrorId : ASSERT FAILED: Unified WiiLink Queue must be captured when the fallback module is loaded.\r\nErrorDetails          : \r\nInvocationInfo        : System.Management.Automation.InvocationInfo\r\nScriptStackTrace      : at Assert-True, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Pl\r\n                        ayer_List\\program\\tests\\Test-WiiLinkFallbackCapturedQueue.ps1: line 8\r\n                        at <ScriptBlock>, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_\r\n                        Player_List\\program\\tests\\Test-WiiLinkFallbackCapturedQueue.ps1: line 57\r\n                        at <ScriptBlock>, D:\\a\\_temp\\c68dcba4-2a1a-47fd-859b-e7b8e30a5f89.ps1: line 28\r\n                        at <ScriptBlock>, <No file>: line 1\r\nPipelineIterationInfo : {}\r\n\r\n\r\n\r\n\r\n",
+    "validation": null,
     "package": null
   },
   "release": null,
   "asset": null,
-  "verifiedAt": "2026-07-23T03:36:08.477Z"
+  "verifiedAt": "2026-07-23T03:39:12.157Z"
 }
