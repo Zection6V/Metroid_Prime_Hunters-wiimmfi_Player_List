@@ -1,19 +1,16 @@
-name: Upload program ZIP to Release Assets
-# Validation revision: browser-fallback-positional-stage; program contents remain at ZIP root.
+name: Publish immutable program Release
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - '.github/workflows/upload-program-release-asset.yml'
   workflow_dispatch:
     inputs:
       tag:
-        description: GitHub Release tag to update
+        description: New GitHub Release tag; an existing tag or Release is rejected
         required: true
-        default: v2026.07.23.1
+      title:
+        description: Release title
+        required: true
       ref:
-        description: Repository ref whose program directory is packaged
+        description: Repository ref to package and release
         required: true
         default: master
 
@@ -21,208 +18,174 @@ permissions:
   contents: write
 
 concurrency:
-  group: upload-program-release-asset
+  group: publish-program-release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
-  package-and-upload:
+  validate-package-publish:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
-      TARGET_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'v2026.07.23.1' }}
-      TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || 'master' }}
+      TARGET_TAG: ${{ inputs.tag }}
+      TARGET_TITLE: ${{ inputs.title }}
+      TARGET_REF: ${{ inputs.ref }}
       ASSET_NAME: Metroid_Prime_Hunters-wiimmfi_Player_List.zip
 
     steps:
-      - name: Checkout release source
+      - name: Checkout exact release source
         uses: actions/checkout@v4
         with:
           ref: ${{ env.TARGET_REF }}
+          fetch-depth: 0
 
-      - name: Test automatic WiiLink browser fallback
-        id: browser_fallback_test
+      - name: Resolve immutable target commit
+        id: target
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sha = (git rev-parse HEAD).Trim()
+          if ($sha -notmatch '^[0-9a-f]{40}$') { throw "Invalid target commit: $sha" }
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Release source is $sha"
+
+      - name: Run deterministic release tests
         shell: powershell
         env:
           MPH_LANG: en
         run: |
-          .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-WiiLinkBrowserFallback.ps1 -LogPath "$env:GITHUB_WORKSPACE\browser-fallback-test.log"
+          $ErrorActionPreference = 'Stop'
+          $tests = @(
+            '.\program\tests\Test-ProxyHttp.ps1',
+            '.\program\tests\Test-WiiLinkBrowserFallback.ps1',
+            '.\program\tests\Test-WiiLinkGroupParsing.ps1',
+            '.\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1',
+            '.\program\tests\Test-NetworkDiagnostics.ps1',
+            '.\program\tests\Test-PayloadLogging.ps1',
+            '.\program\tests\Test-LoggingCore.ps1'
+          )
+          foreach ($test in $tests) {
+            Write-Host "=== $test ==="
+            & $test
+            if ($LASTEXITCODE -ne 0) { throw "Test failed: $test" }
+          }
 
-      - name: Test stats-only WiiLink display
-        id: stats_only_test
-        shell: powershell
-        env:
-          MPH_LANG: en
-        run: |
-          .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1 -LogPath "$env:GITHUB_WORKSPACE\stats-only-display-test.log"
-
-      - name: Package and verify program contents at ZIP root
+      - name: Package program contents at ZIP root
         id: package
-        if: >-
-          steps.browser_fallback_test.outputs.result == 'success' &&
-          steps.stats_only_test.outputs.result == 'success'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $assetPath = Join-Path $env:GITHUB_WORKSPACE $env:ASSET_NAME
           $programRoot = Join-Path $env:GITHUB_WORKSPACE 'program'
-          $verifyRoot = Join-Path $env:RUNNER_TEMP 'mph-release-asset-verify'
-
+          $verifyRoot = Join-Path $env:RUNNER_TEMP 'mph-release-verify'
           Remove-Item -LiteralPath $assetPath -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue
 
-          $programItems = @(Get-ChildItem -LiteralPath $programRoot -Force)
-          if ($programItems.Count -eq 0) { throw 'program directory is empty.' }
+          $items = @(Get-ChildItem -LiteralPath $programRoot -Force)
+          if ($items.Count -eq 0) { throw 'program directory is empty.' }
           Compress-Archive -Path (Join-Path $programRoot '*') -DestinationPath $assetPath -CompressionLevel Optimal -Force
-
           Expand-Archive -LiteralPath $assetPath -DestinationPath $verifyRoot -Force
+
           if (Test-Path -LiteralPath (Join-Path $verifyRoot 'program') -PathType Container) {
-            throw 'Release ZIP verification failed; program directory must not exist at ZIP root.'
+            throw 'program directory must not be present at ZIP root.'
           }
-          $requiredFiles = @(
+          foreach ($file in @(
             'MPH-Unified.ps1',
             'Wiimmfi-PlayerList.ps1',
             'WiiLink-PlayerList.ps1',
-            'Run MPH Unified.bat'
-          )
-          foreach ($relativePath in $requiredFiles) {
-            if (-not (Test-Path -LiteralPath (Join-Path $verifyRoot $relativePath) -PathType Leaf)) {
-              throw "Release ZIP verification failed; missing root entry $relativePath"
-            }
-          }
-          foreach ($requiredDirectory in @('lib', 'tests')) {
-            if (-not (Test-Path -LiteralPath (Join-Path $verifyRoot $requiredDirectory) -PathType Container)) {
-              throw "Release ZIP verification failed; missing root directory $requiredDirectory"
+            'Run MPH Unified.bat',
+            'lib\NetworkDiagnostics.ps1',
+            'lib\WiiLinkFallback.ps1',
+            'tests\Test-NetworkDiagnostics.ps1'
+          )) {
+            if (-not (Test-Path -LiteralPath (Join-Path $verifyRoot $file) -PathType Leaf)) {
+              throw "Release ZIP verification failed; missing $file"
             }
           }
 
-          $file = Get-Item -LiteralPath $assetPath
+          $zip = Get-Item -LiteralPath $assetPath
           $sha256 = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "asset_size=$($file.Length)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "asset_sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Verified root-layout $env:ASSET_NAME ($($file.Length) bytes, SHA-256 $sha256)"
+          "path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "size=$($zip.Length)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Verified $env:ASSET_NAME size=$($zip.Length) sha256=$sha256"
 
-      - name: Replace GitHub Release Asset
-        id: upload
-        if: steps.package.outcome == 'success'
+      - name: Create new Release and upload immutable Asset
         uses: actions/github-script@v7
         env:
-          ASSET_PATH: ${{ steps.package.outputs.asset_path }}
-          ASSET_SIZE: ${{ steps.package.outputs.asset_size }}
-          ASSET_SHA256: ${{ steps.package.outputs.asset_sha256 }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          ASSET_PATH: ${{ steps.package.outputs.path }}
+          ASSET_SIZE: ${{ steps.package.outputs.size }}
+          ASSET_SHA256: ${{ steps.package.outputs.sha256 }}
         with:
           script: |
             const fs = require('fs');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const tag = process.env.TARGET_TAG;
-            const name = process.env.ASSET_NAME;
-            const filePath = process.env.ASSET_PATH;
+            const title = process.env.TARGET_TITLE;
+            const targetSha = process.env.TARGET_SHA;
+            const assetName = process.env.ASSET_NAME;
+            const assetPath = process.env.ASSET_PATH;
             const expectedSize = Number(process.env.ASSET_SIZE);
 
-            const release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
-            for (const existing of release.assets.filter(asset => asset.name === name)) {
-              core.info(`Deleting existing asset ${existing.id}: ${existing.name}`);
-              await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
-            }
-
-            const data = fs.readFileSync(filePath);
-            if (data.length !== expectedSize) {
-              throw new Error(`Local asset size mismatch: expected=${expectedSize}, actual=${data.length}`);
-            }
-
-            const uploaded = (await github.rest.repos.uploadReleaseAsset({
-              owner,
-              repo,
-              release_id: release.id,
-              name,
-              data,
-              headers: {
-                'content-type': 'application/zip',
-                'content-length': data.length
-              }
-            })).data;
-
-            if (uploaded.name !== name || uploaded.size !== data.length) {
-              throw new Error(`Uploaded asset verification failed: name=${uploaded.name}, size=${uploaded.size}`);
-            }
-
-            core.setOutput('asset_id', String(uploaded.id));
-            core.setOutput('asset_url', uploaded.browser_download_url);
-            core.setOutput('asset_size', String(uploaded.size));
-            core.notice(`Uploaded ${uploaded.name}: ${uploaded.browser_download_url}`);
-
-      - name: Record fallback, display, and Release Asset result
-        if: always()
-        uses: actions/github-script@v7
-        env:
-          BROWSER_FALLBACK_RESULT: ${{ steps.browser_fallback_test.outputs.result }}
-          STATS_ONLY_RESULT: ${{ steps.stats_only_test.outputs.result }}
-          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
-          ASSET_SHA256: ${{ steps.package.outputs.asset_sha256 }}
-        with:
-          script: |
-            const fs = require('fs');
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const tag = process.env.TARGET_TAG;
-            const statusPath = `.github/release-status/${tag}.json`;
-            const release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
-            const asset = release.assets.find(item => item.name === process.env.ASSET_NAME);
-
-            let current = {};
-            let statusSha;
             try {
-              const file = (await github.rest.repos.getContent({ owner, repo, path: statusPath, ref: 'master' })).data;
-              statusSha = file.sha;
-              current = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+              await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              throw new Error(`Release ${tag} already exists; published releases are immutable.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+              throw new Error(`Tag ${tag} already exists; choose a new version.`);
             } catch (error) {
               if (error.status !== 404) throw error;
             }
 
-            function readFailure(result, filename) {
-              if (result === 'success') return null;
-              const logPath = `${process.env.GITHUB_WORKSPACE}\\${filename}`;
-              let text = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : 'Test log was not created.';
-              if (text.length > 16000) text = text.slice(-16000);
-              return text;
+            const data = fs.readFileSync(assetPath);
+            if (data.length !== expectedSize) {
+              throw new Error(`ZIP size changed before upload: expected=${expectedSize}, actual=${data.length}`);
             }
 
-            const uploadSucceeded = process.env.UPLOAD_OUTCOME === 'success' && Boolean(asset);
-            const status = {
-              ...current,
-              published: !release.draft && uploadSucceeded,
-              tag,
-              name: release.name,
-              url: release.html_url,
-              releaseId: release.id,
-              draft: release.draft,
-              prerelease: release.prerelease,
-              browserFallbackTest: process.env.BROWSER_FALLBACK_RESULT || 'unknown',
-              browserFallbackFailureLog: readFailure(process.env.BROWSER_FALLBACK_RESULT, 'browser-fallback-test.log'),
-              statsOnlyDisplayTest: process.env.STATS_ONLY_RESULT || 'unknown',
-              statsOnlyDisplayFailureLog: readFailure(process.env.STATS_ONLY_RESULT, 'stats-only-display-test.log'),
-              packageOutcome: process.env.PACKAGE_OUTCOME,
-              uploadOutcome: process.env.UPLOAD_OUTCOME,
-              asset: uploadSucceeded ? {
-                uploaded: true,
-                id: asset.id,
-                name: asset.name,
-                size: asset.size,
-                sha256: process.env.ASSET_SHA256,
-                layout: 'program-contents-at-zip-root',
-                downloadUrl: asset.browser_download_url
-              } : current.asset,
-              assetVerifiedAt: uploadSucceeded ? new Date().toISOString() : current.assetVerifiedAt
-            };
+            let release;
+            try {
+              release = (await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: targetSha,
+                name: title,
+                body: [
+                  'This Release was generated from an immutable commit.',
+                  '',
+                  `Target commit: ${targetSha}`,
+                  `Asset SHA-256: ${process.env.ASSET_SHA256}`
+                ].join('\n'),
+                draft: false,
+                prerelease: false,
+                make_latest: 'true'
+              })).data;
 
-            await github.rest.repos.createOrUpdateFileContents({
-              owner,
-              repo,
-              path: statusPath,
-              message: `Record ${tag} browser fallback asset result`,
-              content: Buffer.from(JSON.stringify(status, null, 2) + '\n').toString('base64'),
-              sha: statusSha,
-              branch: 'master'
-            });
+              const uploaded = (await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.id,
+                name: assetName,
+                data,
+                headers: {
+                  'content-type': 'application/zip',
+                  'content-length': data.length
+                }
+              })).data;
+
+              if (uploaded.name !== assetName || uploaded.size !== data.length) {
+                throw new Error(`Uploaded Asset verification failed: name=${uploaded.name}, size=${uploaded.size}`);
+              }
+              core.notice(`Published immutable Release ${tag}: ${release.html_url}`);
+              core.notice(`Asset: ${uploaded.browser_download_url}`);
+            } catch (error) {
+              if (release) {
+                try { await github.rest.repos.deleteRelease({ owner, repo, release_id: release.id }); } catch (_) {}
+                try { await github.rest.git.deleteRef({ owner, repo, ref: `tags/${tag}` }); } catch (_) {}
+              }
+              throw error;
+            }
