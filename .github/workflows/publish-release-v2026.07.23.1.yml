@@ -28,50 +28,36 @@ jobs:
         shell: powershell
         env:
           MPH_LANG: en
-        run: |
-          $logPath = Join-Path $env:GITHUB_WORKSPACE 'proxy-test.log'
-          try {
-              & .\program\tests\Test-ProxyHttp.ps1 *>&1 | Tee-Object -FilePath $logPath
-              "result=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          } catch {
-              $details = @(
-                  "Message: $($_.Exception.Message)"
-                  "Type: $($_.Exception.GetType().FullName)"
-                  "Position: $($_.InvocationInfo.PositionMessage)"
-                  "ScriptStackTrace: $($_.ScriptStackTrace)"
-                  "FullError: $($_ | Format-List * -Force | Out-String)"
-              ) -join [Environment]::NewLine
-              $details | Tee-Object -FilePath $logPath -Append
-              "result=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          }
+        run: .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-ProxyHttp.ps1 -LogPath "$env:GITHUB_WORKSPACE\proxy-test.log"
 
       - name: Test payload logging
         id: payload_tests
-        if: steps.proxy_tests.outputs.result == 'success'
         shell: powershell
         env:
           MPH_LANG: en
-        run: .\program\tests\Test-PayloadLogging.ps1
+        run: .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-PayloadLogging.ps1 -LogPath "$env:GITHUB_WORKSPACE\payload-test.log"
 
       - name: Test logging core
         id: logging_tests
-        if: steps.proxy_tests.outputs.result == 'success'
         shell: powershell
         env:
           MPH_LANG: en
-        run: .\program\tests\Test-LoggingCore.ps1
+        run: .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-LoggingCore.ps1 -LogPath "$env:GITHUB_WORKSPACE\logging-test.log"
 
       - name: Test syntax and live WiiLink transports
         id: transport_tests
-        if: steps.proxy_tests.outputs.result == 'success'
         shell: powershell
         env:
           MPH_LANG: en
-        run: .\program\tests\Test-WiiLinkTransports.ps1
+        run: .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-WiiLinkTransports.ps1 -LogPath "$env:GITHUB_WORKSPACE\transport-test.log"
 
       - name: Create tag and GitHub Release
         id: publish
-        if: steps.proxy_tests.outputs.result == 'success' && success()
+        if: >-
+          steps.proxy_tests.outputs.result == 'success' &&
+          steps.payload_tests.outputs.result == 'success' &&
+          steps.logging_tests.outputs.result == 'success' &&
+          steps.transport_tests.outputs.result == 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -133,9 +119,9 @@ jobs:
         uses: actions/github-script@v7
         env:
           PROXY_RESULT: ${{ steps.proxy_tests.outputs.result }}
-          PAYLOAD_OUTCOME: ${{ steps.payload_tests.outcome }}
-          LOGGING_OUTCOME: ${{ steps.logging_tests.outcome }}
-          TRANSPORT_OUTCOME: ${{ steps.transport_tests.outcome }}
+          PAYLOAD_RESULT: ${{ steps.payload_tests.outputs.result }}
+          LOGGING_RESULT: ${{ steps.logging_tests.outputs.result }}
+          TRANSPORT_RESULT: ${{ steps.transport_tests.outputs.result }}
           PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
         with:
           script: |
@@ -151,16 +137,21 @@ jobs:
               if (error.status !== 404) throw error;
             }
 
-            let proxyFailureLog = null;
-            const proxyLogPath = `${process.env.GITHUB_WORKSPACE}\\proxy-test.log`;
-            if (process.env.PROXY_RESULT !== 'success' && fs.existsSync(proxyLogPath)) {
-              const buffer = fs.readFileSync(proxyLogPath);
-              proxyFailureLog = buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe
-                ? buffer.slice(2).toString('utf16le')
-                : buffer.toString('utf8');
-              if (proxyFailureLog.length > 16000) proxyFailureLog = proxyFailureLog.slice(-16000);
+            function readFailure(result, filename) {
+              if (result === 'success') return null;
+              const filePath = `${process.env.GITHUB_WORKSPACE}\\${filename}`;
+              if (!fs.existsSync(filePath)) return 'Log file was not created.';
+              let text = fs.readFileSync(filePath, 'utf8');
+              if (text.length > 16000) text = text.slice(-16000);
+              return text;
             }
 
+            const results = {
+              proxy: process.env.PROXY_RESULT || 'unknown',
+              payload: process.env.PAYLOAD_RESULT || 'unknown',
+              logging: process.env.LOGGING_RESULT || 'unknown',
+              transports: process.env.TRANSPORT_RESULT || 'unknown'
+            };
             const status = {
               published: Boolean(release) && !release.draft,
               tag,
@@ -170,13 +161,13 @@ jobs:
               draft: release ? release.draft : null,
               prerelease: release ? release.prerelease : null,
               targetCommit: context.sha,
-              tests: {
-                proxy: process.env.PROXY_RESULT || 'unknown',
-                payload: process.env.PAYLOAD_OUTCOME,
-                logging: process.env.LOGGING_OUTCOME,
-                transports: process.env.TRANSPORT_OUTCOME
+              tests: results,
+              failureLogs: {
+                proxy: readFailure(results.proxy, 'proxy-test.log'),
+                payload: readFailure(results.payload, 'payload-test.log'),
+                logging: readFailure(results.logging, 'logging-test.log'),
+                transports: readFailure(results.transports, 'transport-test.log')
               },
-              proxyFailureLog,
               publishOutcome: process.env.PUBLISH_OUTCOME,
               verifiedAt: new Date().toISOString()
             };
