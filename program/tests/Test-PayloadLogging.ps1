@@ -81,7 +81,7 @@ Assert-True ($wiiLinkSource -match "Name 'groups\.raw\.json'") 'WiiLink must log
 $statsPayloadIndex = $wiiLinkSource.IndexOf("Name 'stats.raw.json'", [System.StringComparison]::Ordinal)
 $statsParseIndex = $wiiLinkSource.IndexOf('Parsing stats JSON', [System.StringComparison]::Ordinal)
 $groupsPayloadIndex = $wiiLinkSource.IndexOf("Name 'groups.raw.json'", [System.StringComparison]::Ordinal)
-$groupsParseIndex = $wiiLinkSource.IndexOf('Parsing groups JSON', [System.StringComparison]::Ordinal)
+$groupsParseIndex = $wiiLinkSource.IndexOf('Parsing and normalizing groups JSON', [System.StringComparison]::Ordinal)
 Assert-True ($statsPayloadIndex -ge 0 -and $statsPayloadIndex -lt $statsParseIndex) 'Stats payload must be logged before JSON parsing.'
 Assert-True ($groupsPayloadIndex -ge 0 -and $groupsPayloadIndex -lt $groupsParseIndex) 'Groups payload must be logged before JSON parsing.'
 
