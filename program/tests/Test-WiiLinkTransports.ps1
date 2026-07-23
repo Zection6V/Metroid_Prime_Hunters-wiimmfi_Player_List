@@ -39,10 +39,10 @@ $referenceOlKeys = @($reference.olStat.Keys | Sort-Object)
 foreach ($lang in $supportedLanguages) {
     $table = Get-MphI18n -Lang $lang
     Assert-True ($table.lang -eq $lang) ("Language table must report {0}, got {1}" -f $lang, $table.lang)
-    Assert-True ((Compare-Object $referenceKeys @($table.Keys | Sort-Object)).Count -eq 0) ("Top-level translation keys differ for {0}" -f $lang)
-    Assert-True ((Compare-Object $referenceStatusKeys @($table.status.Keys | Sort-Object)).Count -eq 0) ("Status translation keys differ for {0}" -f $lang)
-    Assert-True ((Compare-Object $referenceModeKeys @($table.mode.Keys | Sort-Object)).Count -eq 0) ("Mode translation keys differ for {0}" -f $lang)
-    Assert-True ((Compare-Object $referenceOlKeys @($table.olStat.Keys | Sort-Object)).Count -eq 0) ("Online-state translation keys differ for {0}" -f $lang)
+    Assert-True (@(Compare-Object $referenceKeys @($table.Keys | Sort-Object)).Count -eq 0) ("Top-level translation keys differ for {0}" -f $lang)
+    Assert-True (@(Compare-Object $referenceStatusKeys @($table.status.Keys | Sort-Object)).Count -eq 0) ("Status translation keys differ for {0}" -f $lang)
+    Assert-True (@(Compare-Object $referenceModeKeys @($table.mode.Keys | Sort-Object)).Count -eq 0) ("Mode translation keys differ for {0}" -f $lang)
+    Assert-True (@(Compare-Object $referenceOlKeys @($table.olStat.Keys | Sort-Object)).Count -eq 0) ("Online-state translation keys differ for {0}" -f $lang)
     Assert-True ($table.intervals.Count -eq 5) ("Interval choices missing for {0}" -f $lang)
     foreach ($key in $referenceKeys) {
         if ($key -in @('status', 'mode', 'olStat', 'intervals')) { continue }
