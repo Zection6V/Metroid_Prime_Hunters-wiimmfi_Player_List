@@ -1,0 +1,16 @@
+{
+  "published": false,
+  "immutable": true,
+  "tag": "v2026.07.23.2",
+  "name": "v2026.07.23.2 — Direct API Network Diagnostics",
+  "targetCommit": "a40e7ecc01300c90108e28d4075d188c0ec092c4",
+  "outcomes": {
+    "syntax": "success",
+    "tests": "failure",
+    "package": "skipped",
+    "release": "skipped"
+  },
+  "release": null,
+  "asset": null,
+  "verifiedAt": "2026-07-23T02:49:08.813Z"
+}
