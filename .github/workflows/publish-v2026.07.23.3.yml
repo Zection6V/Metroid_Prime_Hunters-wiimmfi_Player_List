@@ -21,7 +21,7 @@ jobs:
     env:
       RELEASE_TAG: v2026.07.23.3
       RELEASE_TITLE: v2026.07.23.3 — Reliable Direct API NETDIAG
-      TARGET_SHA: c9331d7527b353639937c68da06d4d6d46428544
+      TARGET_SHA: fed38f1caa41fa7e0b78602d947f5fe43247313c
       ASSET_NAME: Metroid_Prime_Hunters-wiimmfi_Player_List.zip
 
     steps:
@@ -220,7 +220,10 @@ jobs:
             const readTail = (name) => {
               const p = `${process.env.GITHUB_WORKSPACE}\\${name}`;
               if (!fs.existsSync(p)) return null;
-              let text = fs.readFileSync(p, 'utf8');
+              const data = fs.readFileSync(p);
+              let text;
+              if (data.length >= 2 && data[0] === 0xff && data[1] === 0xfe) text = data.subarray(2).toString('utf16le');
+              else text = data.toString('utf8');
               if (text.length > 30000) text = text.slice(-30000);
               return text;
             };
