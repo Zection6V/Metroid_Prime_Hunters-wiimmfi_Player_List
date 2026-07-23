@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $programDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -12,7 +12,6 @@ function Assert-True {
     if (-not $Condition) { throw "ASSERT FAILED: $Message" }
 }
 
-# Keep this test file ASCII-only so Windows PowerShell 5.1 can parse it without a UTF-8 BOM.
 $i18n = Get-MphI18n -Lang 'en'
 $colors = @{
     cream = [System.Drawing.Color]::Beige
@@ -36,10 +35,12 @@ try {
 
     Update-WiiLinkTree -Tree $tree -Head $head -Json $statsOnly -Colors $colors -I18n $i18n
     Assert-True ($head.Text -match ('{0}\s+1' -f [regex]::Escape([string]$i18n.wlOn))) 'Header must preserve stats.mprimeds.online=1.'
-    Assert-True ($tree.Nodes.Count -eq 1) 'Stats-only response must render one summary node.'
-    Assert-True ([string]$tree.Nodes[0].Text -match ('{0}:\s*1' -f [regex]::Escape([string]$i18n.wlOn))) 'Summary node must show the stats online count.'
-    Assert-True ([string]$tree.Nodes[0].Text -notmatch [regex]::Escape([string]$i18n.nobody)) 'Stats-only response must not display nobody-online text.'
-    Assert-True ([string]$tree.Nodes[0].Tag.Key -eq 'wl-stats') 'Stats-only summary must use the stable wl-stats node key.'
+    Assert-True ($tree.Nodes.Count -eq 2) 'Stats-only response must render the room-visibility note and one summary node.'
+    Assert-True ([string]$tree.Nodes[0].Text -eq [string]$i18n.wlRoomVisibilityNote) 'The first node must explain WiiLink room visibility.'
+    Assert-True ([string]$tree.Nodes[0].Tag.Key -eq 'wl-room-visibility-note') 'The note must use a stable node key.'
+    Assert-True ([string]$tree.Nodes[1].Text -match ('{0}:\s*1' -f [regex]::Escape([string]$i18n.wlOn))) 'Summary node must show the stats online count.'
+    Assert-True ([string]$tree.Nodes[1].Text -notmatch [regex]::Escape([string]$i18n.nobody)) 'Stats-only response must not display nobody-online text.'
+    Assert-True ([string]$tree.Nodes[1].Tag.Key -eq 'wl-stats') 'Stats-only summary must use the stable wl-stats node key.'
 
     Write-Host '== genuinely empty response =='
     $empty = @{
@@ -50,8 +51,9 @@ try {
     } | ConvertTo-Json -Depth 6 -Compress
 
     Update-WiiLinkTree -Tree $tree -Head $head -Json $empty -Colors $colors -I18n $i18n
-    Assert-True ($tree.Nodes.Count -eq 1) 'Empty response must render one placeholder node.'
-    Assert-True ([string]$tree.Nodes[0].Text -eq [string]$i18n.nobody) 'All-zero stats must keep the nobody-online placeholder.'
+    Assert-True ($tree.Nodes.Count -eq 2) 'Empty response must render the room-visibility note and one placeholder node.'
+    Assert-True ([string]$tree.Nodes[0].Text -eq [string]$i18n.wlRoomVisibilityNote) 'Empty response must retain the room-visibility explanation.'
+    Assert-True ([string]$tree.Nodes[1].Text -eq [string]$i18n.nobody) 'All-zero stats must keep the nobody-online placeholder.'
 
     Write-Host 'RESULT: SUCCESS'
 } finally {
