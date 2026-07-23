@@ -126,6 +126,9 @@ foreach ($viewer in @($standalone, $unified)) {
     Assert-True ($viewer -match "(?:-Stage\s+)?'FALLBACK'") 'Viewer must record the automatic switch in diagnostics.'
     Assert-True ($viewer -match 'Get-WiiLinkTransportComboIndex') 'Viewer UI selector must follow the worker-selected transport.'
 }
-Assert-True ((Get-Content -LiteralPath (Join-Path $programDir 'lib\WiiLinkFallback.ps1') -Raw) -match 'Start-MphNetworkDiagnostics') 'Fallback policy must schedule Direct API diagnostics.'
+$fallbackSource = Get-Content -LiteralPath (Join-Path $programDir 'lib\WiiLinkFallback.ps1') -Raw
+Assert-True ($fallbackSource -match 'Invoke-MphNetworkDiagnostics') 'Fallback policy must run Direct API diagnostics in the WiiLink worker.'
+Assert-True ($fallbackSource -match 'Running detailed Direct API diagnostics') 'Fallback policy must emit a visible NETDIAG start record.'
+Assert-True ($fallbackSource -notmatch 'Start-MphNetworkDiagnostics') 'Obsolete child-runspace diagnostics must not return.'
 
 Write-Host 'RESULT: SUCCESS'
