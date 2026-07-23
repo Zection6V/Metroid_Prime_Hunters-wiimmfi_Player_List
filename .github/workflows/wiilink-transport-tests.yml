@@ -1,136 +1,28 @@
-name: Player list diagnostics tests
+name: One-time v2026.07.23.5 publisher
 
 on:
-  push:
-    paths:
-      - 'program/**'
-      - '.github/workflows/wiilink-transport-tests.yml'
   pull_request:
     paths:
-      - 'program/**'
       - '.github/workflows/wiilink-transport-tests.yml'
-  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  proxy-http:
-    runs-on: windows-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Test direct, environment, and Windows proxy fallback
-        shell: powershell
-        env:
-          MPH_LANG: en
-        run: .\program\tests\Test-ProxyHttp.ps1
-
-  wiilink-browser-fallback:
-    needs: proxy-http
-    runs-on: windows-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Test automatic switch and reliable NETDIAG Queue capture
-        shell: powershell
-        env:
-          MPH_LANG: en
-        run: |
-          .\program\tests\Test-WiiLinkBrowserFallback.ps1
-          .\program\tests\Test-WiiLinkFallbackCapturedQueue.ps1
-
-  wiilink-group-parsing:
-    needs: wiilink-browser-fallback
-    runs-on: windows-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Test groups response shapes and game-filtered endpoints
-        shell: powershell
-        env:
-          MPH_LANG: en
-        run: |
-          .\program\tests\Test-WiiLinkGroupParsing.ps1
-          .\program\tests\Test-WiiLinkGameFilter.ps1
-
-  wiilink-stats-only-display:
-    needs: wiilink-group-parsing
-    runs-on: windows-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Test stats-only online display without groups
-        shell: powershell
-        env:
-          MPH_LANG: ja
-        run: .\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1
-
-  payload-logging:
-    needs: wiilink-stats-only-display
-    runs-on: windows-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Test payload chunking, truncation, and source integration
-        shell: powershell
-        env:
-          MPH_LANG: en
-        run: .\program\tests\Test-PayloadLogging.ps1
-
-  logging-core:
-    needs: payload-logging
-    runs-on: windows-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Test log storage and incremental rendering
-        shell: powershell
-        env:
-          MPH_LANG: en
-        run: |
-          .\program\tests\Test-LoggingCore.ps1
-          .\program\tests\Test-DiagnosticLogIncremental.ps1
-
-  test-wiilink-transports:
-    needs: logging-core
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Show browser availability
-        shell: powershell
-        run: |
-          $edge = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe' -ErrorAction SilentlyContinue).'(default)'
-          $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)'
-          Write-Host "Edge=$edge"
-          Write-Host "Chrome=$chrome"
-      - name: Test syntax, log UI, direct API, and Chrome or Edge transport
-        shell: powershell
-        env:
-          MPH_LANG: en
-        run: .\program\tests\Test-WiiLinkTransports.ps1
-
-  publish-v2026-07-23-5-immediate:
-    if: github.event_name == 'push'
+  publish:
     runs-on: windows-latest
     timeout-minutes: 10
     env:
       RELEASE_TAG: v2026.07.23.5
       RELEASE_TITLE: v2026.07.23.5 — Unambiguous WiiLink Room Visibility Note
       ASSET_NAME: Metroid_Prime_Hunters-wiimmfi_Player_List.zip
+      TARGET_SHA: d4d402d0b7fb0a07787bf89573222e5dd4e117d0
+
     steps:
-      - name: Checkout fixed commit
+      - name: Checkout publisher branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Validate wording and package ZIP
@@ -147,7 +39,7 @@ jobs:
           .\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1
 
           $assetPath = Join-Path $env:GITHUB_WORKSPACE $env:ASSET_NAME
-          $verifyRoot = Join-Path $env:RUNNER_TEMP 'mph-v2026-07-23-5-immediate-verify'
+          $verifyRoot = Join-Path $env:RUNNER_TEMP 'mph-v2026-07-23-5-pr-verify'
           Remove-Item -LiteralPath $assetPath -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue
           Compress-Archive -Path (Join-Path $env:GITHUB_WORKSPACE 'program\*') -DestinationPath $assetPath -CompressionLevel Optimal -Force
@@ -162,14 +54,13 @@ jobs:
           "size=$($zip.Length)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Create new immutable Release and Asset
+      - name: Create immutable Release and Asset
         id: release
         uses: actions/github-script@v7
         env:
           ASSET_PATH: ${{ steps.package.outputs.path }}
           ASSET_SIZE: ${{ steps.package.outputs.size }}
           ASSET_SHA256: ${{ steps.package.outputs.sha256 }}
-          TARGET_SHA: ${{ github.sha }}
         with:
           script: |
             const fs = require('fs');
@@ -184,6 +75,7 @@ jobs:
               await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
               throw new Error(`Tag ${tag} already exists and will not be moved.`);
             } catch (error) { if (error.status !== 404) throw error; }
+
             const data = fs.readFileSync(process.env.ASSET_PATH);
             let release;
             try {
@@ -230,7 +122,6 @@ jobs:
       - name: Record successful publication
         uses: actions/github-script@v7
         env:
-          TARGET_SHA: ${{ github.sha }}
           RELEASE_ID: ${{ steps.release.outputs.release_id }}
           RELEASE_URL: ${{ steps.release.outputs.release_url }}
           ASSET_ID: ${{ steps.release.outputs.asset_id }}
