@@ -1,5 +1,5 @@
 name: Publish v2026.07.23.1
-# Validation revision: final-empty-collection-and-context-fixes
+# Validation revision: release-program-zip-asset
 
 on:
   push:
@@ -18,7 +18,7 @@ concurrency:
 jobs:
   validate-and-publish:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -59,14 +59,58 @@ jobs:
           MPH_LANG: en
         run: .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-WiiLinkTransports.ps1 -LogPath "$env:GITHUB_WORKSPACE\transport-test.log"
 
-      - name: Create tag and GitHub Release
-        id: publish
+      - name: Package program directory
+        id: package_asset
         if: >-
           steps.proxy_tests.outputs.result == 'success' &&
           steps.parsing_tests.outputs.result == 'success' &&
           steps.payload_tests.outputs.result == 'success' &&
           steps.logging_tests.outputs.result == 'success' &&
           steps.transport_tests.outputs.result == 'success'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetName = 'Metroid_Prime_Hunters-wiimmfi_Player_List.zip'
+          $assetPath = Join-Path $env:GITHUB_WORKSPACE $assetName
+          $stagingRoot = Join-Path $env:RUNNER_TEMP 'mph-release-package'
+          $verifyRoot = Join-Path $env:RUNNER_TEMP 'mph-release-package-verify'
+
+          Remove-Item -LiteralPath $assetPath -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+          New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'program') -Destination $stagingRoot -Recurse -Force
+          Compress-Archive -LiteralPath (Join-Path $stagingRoot 'program') -DestinationPath $assetPath -CompressionLevel Optimal -Force
+
+          if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+            throw "Release asset was not created: $assetPath"
+          }
+
+          Expand-Archive -LiteralPath $assetPath -DestinationPath $verifyRoot -Force
+          $requiredFiles = @(
+            'program\MPH-Unified.ps1',
+            'program\Wiimmfi-PlayerList.ps1',
+            'program\WiiLink-PlayerList.ps1',
+            'program\Run MPH Unified.bat'
+          )
+          foreach ($relativePath in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $verifyRoot $relativePath) -PathType Leaf)) {
+              throw "Release ZIP verification failed; missing $relativePath"
+            }
+          }
+
+          $file = Get-Item -LiteralPath $assetPath
+          $sha256 = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset_size=$($file.Length)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset_sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Packaged $assetName ($($file.Length) bytes, SHA-256 $sha256)"
+
+      - name: Create tag and GitHub Release
+        id: publish
+        if: steps.package_asset.outcome == 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -89,6 +133,9 @@ jobs:
               '- Direct APIで解決しない環境ではChrome／Edge経路を引き続き選択可能',
               '- プロキシ経路、JSON形状、payload、ログ、実通信の回帰テストを追加',
               '',
+              '### ダウンロード',
+              '- Assetsの `Metroid_Prime_Hunters-wiimmfi_Player_List.zip` をダウンロードして展開してください。',
+              '',
               'Windowsシステムプロキシだけを使用する場合: `set MPH_PROXY=system`',
               '',
               '---',
@@ -104,7 +151,9 @@ jobs:
               '- Normalized empty, array, wrapped, and ID-mapped groups API responses',
               '- Prevented zero-room responses from failing under PowerShell StrictMode',
               '- Added deterministic proxy, parsing, payload, logging, and live-transport tests',
-              '- Chrome / Edge remains available as a selectable fallback transport'
+              '- Chrome / Edge remains available as a selectable fallback transport',
+              '',
+              'Download `Metroid_Prime_Hunters-wiimmfi_Player_List.zip` from Assets and extract it.'
             ].join('\n');
 
             try {
@@ -116,6 +165,16 @@ jobs:
 
             try {
               const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: existing.data.id,
+                name,
+                body,
+                draft: false,
+                prerelease: false,
+                make_latest: 'true'
+              });
               core.setOutput('release_url', existing.data.html_url);
               return;
             } catch (error) {
@@ -128,7 +187,36 @@ jobs:
             });
             core.setOutput('release_url', release.data.html_url);
 
-      - name: Record validation and release result
+      - name: Upload program ZIP to Release Assets
+        id: upload_asset
+        if: steps.publish.outcome == 'success' && steps.package_asset.outcome == 'success'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = 'v2026.07.23.1'
+          $assetName = '${{ steps.package_asset.outputs.asset_name }}'
+          $assetPath = '${{ steps.package_asset.outputs.asset_path }}'
+
+          gh release upload $tag $assetPath --clobber --repo $env:GITHUB_REPOSITORY
+
+          $release = gh api "/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" | ConvertFrom-Json
+          $assets = @($release.assets | Where-Object { [string]$_.name -eq $assetName })
+          if ($assets.Count -ne 1) {
+            throw "Expected one Release Asset named $assetName, found $($assets.Count)."
+          }
+
+          $asset = $assets[0]
+          if ([int64]$asset.size -ne [int64]'${{ steps.package_asset.outputs.asset_size }}') {
+            throw "Uploaded asset size mismatch: local=${{ steps.package_asset.outputs.asset_size }}, remote=$($asset.size)"
+          }
+
+          "asset_url=$($asset.browser_download_url)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset_id=$($asset.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Uploaded and verified $assetName: $($asset.browser_download_url)"
+
+      - name: Record validation, release, and asset result
         if: always()
         uses: actions/github-script@v7
         env:
@@ -137,7 +225,12 @@ jobs:
           PAYLOAD_RESULT: ${{ steps.payload_tests.outputs.result }}
           LOGGING_RESULT: ${{ steps.logging_tests.outputs.result }}
           TRANSPORT_RESULT: ${{ steps.transport_tests.outputs.result }}
+          PACKAGE_OUTCOME: ${{ steps.package_asset.outcome }}
           PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload_asset.outcome }}
+          LOCAL_ASSET_NAME: ${{ steps.package_asset.outputs.asset_name }}
+          LOCAL_ASSET_SIZE: ${{ steps.package_asset.outputs.asset_size }}
+          LOCAL_ASSET_SHA256: ${{ steps.package_asset.outputs.asset_sha256 }}
         with:
           script: |
             const fs = require('fs');
@@ -145,12 +238,15 @@ jobs:
             const repo = context.repo.repo;
             const tag = 'v2026.07.23.1';
             const path = '.github/release-status/v2026.07.23.1.json';
+            const expectedAssetName = process.env.LOCAL_ASSET_NAME || 'Metroid_Prime_Hunters-wiimmfi_Player_List.zip';
             let release = null;
             try {
               release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
             } catch (error) {
               if (error.status !== 404) throw error;
             }
+
+            const asset = release ? release.assets.find(item => item.name === expectedAssetName) : null;
 
             function readFailure(result, filename) {
               if (result === 'success') return null;
@@ -168,8 +264,9 @@ jobs:
               logging: process.env.LOGGING_RESULT || 'unknown',
               transports: process.env.TRANSPORT_RESULT || 'unknown'
             };
+            const assetUploaded = Boolean(asset) && process.env.UPLOAD_OUTCOME === 'success';
             const status = {
-              published: Boolean(release) && !release.draft,
+              published: Boolean(release) && !release.draft && assetUploaded,
               tag,
               name: release ? release.name : 'v2026.07.23.1 — WiiLink Proxy Fallback Hotfix',
               url: release ? release.html_url : null,
@@ -178,6 +275,17 @@ jobs:
               prerelease: release ? release.prerelease : null,
               targetCommit: context.sha,
               tests: results,
+              packageOutcome: process.env.PACKAGE_OUTCOME,
+              publishOutcome: process.env.PUBLISH_OUTCOME,
+              uploadOutcome: process.env.UPLOAD_OUTCOME,
+              asset: {
+                uploaded: assetUploaded,
+                id: asset ? asset.id : null,
+                name: asset ? asset.name : expectedAssetName,
+                size: asset ? asset.size : Number(process.env.LOCAL_ASSET_SIZE || 0),
+                sha256: process.env.LOCAL_ASSET_SHA256 || null,
+                downloadUrl: asset ? asset.browser_download_url : null
+              },
               failureLogs: {
                 proxy: readFailure(results.proxy, 'proxy-test.log'),
                 parsing: readFailure(results.parsing, 'parsing-test.log'),
@@ -185,7 +293,6 @@ jobs:
                 logging: readFailure(results.logging, 'logging-test.log'),
                 transports: readFailure(results.transports, 'transport-test.log')
               },
-              publishOutcome: process.env.PUBLISH_OUTCOME,
               verifiedAt: new Date().toISOString()
             };
             const content = Buffer.from(JSON.stringify(status, null, 2) + '\n').toString('base64');
@@ -197,6 +304,6 @@ jobs:
             }
             await github.rest.repos.createOrUpdateFileContents({
               owner, repo, path,
-              message: `Record ${tag} validation and release result`,
+              message: `Record ${tag} release asset result`,
               content, sha, branch: 'master'
             });
