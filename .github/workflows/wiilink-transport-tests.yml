@@ -30,8 +30,24 @@ jobs:
         run: |
           .\program\tests\Test-ProxyHttp.ps1
 
-  wiilink-group-parsing:
+  wiilink-browser-fallback:
     needs: proxy-http
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test automatic Direct API to Chrome or Edge switch
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-WiiLinkBrowserFallback.ps1
+
+  wiilink-group-parsing:
+    needs: wiilink-browser-fallback
     runs-on: windows-latest
     timeout-minutes: 5
 
