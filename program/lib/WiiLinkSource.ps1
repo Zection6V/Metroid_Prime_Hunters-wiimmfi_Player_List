@@ -29,6 +29,23 @@ function Write-WiiLinkDiagnostic {
     } catch {}
 }
 
+function Add-WiiLinkGameQuery {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Game
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Game)) { return $Url }
+    $uri = [uri]$Url
+    if ([string]$uri.Query -match '(?i)(?:^|[?&])game=') { return $Url }
+
+    $builder = New-Object System.UriBuilder($uri)
+    $existing = ([string]$builder.Query).TrimStart('?')
+    $pair = 'game=' + [uri]::EscapeDataString($Game)
+    $builder.Query = if ([string]::IsNullOrWhiteSpace($existing)) { $pair } else { $existing + '&' + $pair }
+    return $builder.Uri.AbsoluteUri
+}
+
 function Get-WiiLinkPropertyValue {
     param(
         [AllowNull()]$InputObject,
@@ -42,20 +59,36 @@ function Get-WiiLinkPropertyValue {
     return $property.Value
 }
 
+function Test-WiiLinkGroupShape {
+    param([AllowNull()]$Candidate)
+    if ($null -eq $Candidate -or $Candidate -is [System.Array]) { return $false }
+    foreach ($marker in @('game', 'id', 'players', 'host', 'type', 'created', 'suspend')) {
+        if ($null -ne $Candidate.PSObject.Properties[$marker]) { return $true }
+    }
+    return $false
+}
+
 function Add-WiiLinkGroupCandidate {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.ArrayList]$List,
         [AllowNull()]$Candidate,
-        [string]$FallbackId = ''
+        [string]$FallbackId = '',
+        [string]$DefaultGame = ''
     )
 
     if ($null -eq $Candidate) { return }
     if ($Candidate -is [System.Array]) {
-        foreach ($item in @($Candidate)) { Add-WiiLinkGroupCandidate -List $List -Candidate $item -FallbackId $FallbackId }
+        foreach ($item in @($Candidate)) {
+            Add-WiiLinkGroupCandidate -List $List -Candidate $item -FallbackId $FallbackId -DefaultGame $DefaultGame
+        }
         return
     }
 
-    if ($null -eq $Candidate.PSObject.Properties['game']) { return }
+    if (-not (Test-WiiLinkGroupShape -Candidate $Candidate)) { return }
+    if ($null -eq $Candidate.PSObject.Properties['game']) {
+        if ([string]::IsNullOrWhiteSpace($DefaultGame)) { return }
+        try { $Candidate | Add-Member -NotePropertyName game -NotePropertyValue $DefaultGame -Force } catch { return }
+    }
     if (-not [string]::IsNullOrWhiteSpace($FallbackId) -and $null -eq $Candidate.PSObject.Properties['id']) {
         try { $Candidate | Add-Member -NotePropertyName id -NotePropertyValue $FallbackId -Force } catch {}
     }
@@ -65,7 +98,8 @@ function Add-WiiLinkGroupCandidate {
 function ConvertFrom-WiiLinkGroupsJson {
     param(
         [Parameter(Mandatory = $true)][string]$Json,
-        $LogQueue = $null
+        $LogQueue = $null,
+        [string]$DefaultGame = ''
     )
 
     $root = $Json | ConvertFrom-Json
@@ -91,12 +125,14 @@ function ConvertFrom-WiiLinkGroupsJson {
     }
 
     if ($container -is [System.Array]) {
-        foreach ($candidate in @($container)) { Add-WiiLinkGroupCandidate -List $groups -Candidate $candidate }
-    } elseif ($null -ne $container.PSObject.Properties['game']) {
-        Add-WiiLinkGroupCandidate -List $groups -Candidate $container
+        foreach ($candidate in @($container)) {
+            Add-WiiLinkGroupCandidate -List $groups -Candidate $candidate -DefaultGame $DefaultGame
+        }
+    } elseif (Test-WiiLinkGroupShape -Candidate $container) {
+        Add-WiiLinkGroupCandidate -List $groups -Candidate $container -DefaultGame $DefaultGame
     } else {
         foreach ($property in @($container.PSObject.Properties)) {
-            Add-WiiLinkGroupCandidate -List $groups -Candidate $property.Value -FallbackId ([string]$property.Name)
+            Add-WiiLinkGroupCandidate -List $groups -Candidate $property.Value -FallbackId ([string]$property.Name) -DefaultGame $DefaultGame
         }
     }
 
@@ -118,7 +154,7 @@ function Get-WiiLinkProxySettingLabel {
 
 function Start-WiiLinkBrowser {
     param(
-        [string]$Url = 'https://api.wfc.wiilink24.com/api/stats',
+        [string]$Url = 'https://api.wfc.wiilink24.com/api/stats?game=mprimeds',
         $LogQueue = $null
     )
     Write-WiiLinkDiagnostic $LogQueue 'INFO' 'BROWSER' 'Starting Chrome/Edge transport'
@@ -213,6 +249,8 @@ function Get-WiiLinkData {
         $LogQueue = $null
     )
     $i = Get-MphI18n -Lang $Lang
+    $statsRequestUrl = Add-WiiLinkGameQuery -Url $StatsUrl -Game $Game
+    $groupsRequestUrl = Add-WiiLinkGameQuery -Url $GroupsUrl -Game $Game
     $result = @{
         ok = $false; state = 'error'; error = ''; transport = $Transport
         stats = @{ online = 0; active = 0; groups = 0 }
@@ -220,26 +258,27 @@ function Get-WiiLinkData {
         diagnostics = @{
             availableGames = @(); matchedGroups = 0; players = 0
             proxySetting = (Get-WiiLinkProxySettingLabel); statsRoute = ''; groupsRoute = ''
+            statsUrl = $statsRequestUrl; groupsUrl = $groupsRequestUrl
         }
     }
 
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    Write-WiiLinkDiagnostic $LogQueue 'INFO' 'START' ("Update started; game={0}; transport={1}" -f $Game, $Transport)
+    Write-WiiLinkDiagnostic $LogQueue 'INFO' 'START' ("Update started; game={0}; transport={1}; filteredApi=true" -f $Game, $Transport)
     Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'ENV' ("PowerShell={0}; OS={1}; TLS={2}; browserPort={3}; proxySetting={4}" -f $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString, [Net.ServicePointManager]::SecurityProtocol, $BrowserPort, $result.diagnostics.proxySetting)
 
     try {
-        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("Requesting stats API via {0}" -f $Transport)
+        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("Requesting stats API via {0}; game={1}" -f $Transport, $Game)
         $watch = [Diagnostics.Stopwatch]::StartNew()
-        $statsPayload = Get-WiiLinkPayload -Transport $Transport -Url $StatsUrl -Ua $Ua -BrowserPort $BrowserPort -LogQueue $LogQueue
+        $statsPayload = Get-WiiLinkPayload -Transport $Transport -Url $statsRequestUrl -Ua $Ua -BrowserPort $BrowserPort -LogQueue $LogQueue
         $watch.Stop()
         $result.diagnostics.statsRoute = [string]$statsPayload.route
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("stats completed; transport={0}; route={1}; HTTP={2}; bytes={3}; elapsedMs={4}" -f $Transport, $statsPayload.route, $statsPayload.status, $statsPayload.bytes, $watch.ElapsedMilliseconds)
         Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'HTTP' ("stats Content-Type={0}; proxy={1}; timeoutSec={2}" -f $statsPayload.contentType, $statsPayload.proxy, $statsPayload.timeoutSec)
         Write-MphPayloadLog -LogQueue $LogQueue -Source 'WiiLink' -Name 'stats.raw.json' -Content $statsPayload.text -ContentType $statsPayload.contentType
 
-        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("Requesting groups API via {0}" -f $Transport)
+        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("Requesting groups API via {0}; game={1}" -f $Transport, $Game)
         $watch = [Diagnostics.Stopwatch]::StartNew()
-        $groupsPayload = Get-WiiLinkPayload -Transport $Transport -Url $GroupsUrl -Ua $Ua -BrowserPort $BrowserPort -LogQueue $LogQueue
+        $groupsPayload = Get-WiiLinkPayload -Transport $Transport -Url $groupsRequestUrl -Ua $Ua -BrowserPort $BrowserPort -LogQueue $LogQueue
         $watch.Stop()
         $result.diagnostics.groupsRoute = [string]$groupsPayload.route
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'HTTP' ("groups completed; transport={0}; route={1}; HTTP={2}; bytes={3}; elapsedMs={4}" -f $Transport, $groupsPayload.route, $groupsPayload.status, $groupsPayload.bytes, $watch.ElapsedMilliseconds)
@@ -250,20 +289,39 @@ function Get-WiiLinkData {
         $s = $statsPayload.text | ConvertFrom-Json
         $statsProps = @($s.PSObject.Properties)
         $statsGame = $statsProps | Where-Object { ([string]$_.Name).Trim().ToLowerInvariant() -eq $Game.Trim().ToLowerInvariant() } | Select-Object -First 1
+        $sv = $null
+        $statsShape = 'unknown'
         if ($statsGame) {
             $sv = $statsGame.Value
+            $statsShape = 'game-wrapper'
+        } elseif ($null -ne $s.PSObject.Properties['online'] -or $null -ne $s.PSObject.Properties['active'] -or $null -ne $s.PSObject.Properties['groups']) {
+            $sv = $s
+            $statsShape = 'filtered-object'
+        } elseif ($null -ne $s.PSObject.Properties['stats']) {
+            $statsContainer = $s.PSObject.Properties['stats'].Value
+            $wrappedGame = $statsContainer.PSObject.Properties[$Game]
+            if ($null -ne $wrappedGame) {
+                $sv = $wrappedGame.Value
+                $statsShape = 'wrapper.stats.game'
+            } elseif ($null -ne $statsContainer.PSObject.Properties['online']) {
+                $sv = $statsContainer
+                $statsShape = 'wrapper.stats'
+            }
+        }
+
+        if ($null -ne $sv) {
             $result.stats = @{
                 online = [int](Get-WiiLinkPropertyValue -InputObject $sv -Name 'online' -DefaultValue 0)
                 active = [int](Get-WiiLinkPropertyValue -InputObject $sv -Name 'active' -DefaultValue 0)
                 groups = [int](Get-WiiLinkPropertyValue -InputObject $sv -Name 'groups' -DefaultValue 0)
             }
-            Write-WiiLinkDiagnostic $LogQueue 'INFO' 'STATS' ("online={0}; active={1}; groups={2}" -f $result.stats.online, $result.stats.active, $result.stats.groups)
+            Write-WiiLinkDiagnostic $LogQueue 'INFO' 'STATS' ("shape={0}; online={1}; active={2}; groups={3}" -f $statsShape, $result.stats.online, $result.stats.active, $result.stats.groups)
         } else {
-            Write-WiiLinkDiagnostic $LogQueue 'WARN' 'STATS' ("Game key not found in stats; expected={0}; available={1}" -f $Game, (($statsProps.Name | Select-Object -First 30) -join ','))
+            Write-WiiLinkDiagnostic $LogQueue 'WARN' 'STATS' ("Game stats not found; expected={0}; available={1}" -f $Game, (($statsProps.Name | Select-Object -First 30) -join ','))
         }
 
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'JSON' 'Parsing and normalizing groups JSON'
-        $all = @(ConvertFrom-WiiLinkGroupsJson -Json ([string]$groupsPayload.text) -LogQueue $LogQueue)
+        $all = @(ConvertFrom-WiiLinkGroupsJson -Json ([string]$groupsPayload.text) -LogQueue $LogQueue -DefaultGame $Game)
         $availableGames = @($all | ForEach-Object {
                 $groupGame = ([string](Get-WiiLinkPropertyValue -InputObject $_ -Name 'game' -DefaultValue '')).Trim()
                 if ($groupGame) { $groupGame }
@@ -276,7 +334,7 @@ function Get-WiiLinkData {
                 ([string](Get-WiiLinkPropertyValue -InputObject $_ -Name 'game' -DefaultValue '')).Trim().ToLowerInvariant() -eq $gameNorm
             })
         $result.diagnostics.matchedGroups = $matched.Count
-        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'FILTER' ("matchedGroups={0}; expectedGame={1}" -f $matched.Count, $Game)
+        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'FILTER' ("matchedGroups={0}; expectedGame={1}; serverFiltered=true" -f $matched.Count, $Game)
 
         $rooms = @()
         $totalPlayers = 0
