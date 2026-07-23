@@ -70,7 +70,7 @@ $sync = [hashtable]::Synchronized(@{
         Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'; Lang = $i18n.lang
         IntervalMs = 30000; Stop = $false; WiimmfiRefresh = $false; WiiLinkRefresh = $false
         WiimmfiJson = $null; WiimmfiSeq = 0; WiimmfiStatus = 'starting'; WiimmfiPid = 0
-        WiiLinkJson = $null; WiiLinkSeq = 0; WiiLinkStatus = 'starting'; WiiLinkTransport = 'direct'; WiiLinkPid = 0
+        WiiLinkJson = $null; WiiLinkSeq = 0; WiiLinkStatus = 'starting'; WiiLinkTransport = 'browser'; WiiLinkPid = 0
         WiimmfiLogQueue = $wiimmfiLogStore.Queue
         WiiLinkLogQueue = $wiiLinkLogStore.Queue
     })

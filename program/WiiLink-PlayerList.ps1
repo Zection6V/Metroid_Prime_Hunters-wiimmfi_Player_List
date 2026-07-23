@@ -46,7 +46,7 @@ $sync = [hashtable]::Synchronized(@{
         WiiLinkLib = $WiiLinkLib; WiiLinkFallbackLib = $WiiLinkFallbackLib
         Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'; Lang = $i18n.lang
         IntervalMs = 30000; Stop = $false; Refresh = $false; Json = $null; Seq = 0; Status = 'starting'
-        Transport = 'direct'; BrowserPid = 0; LogQueue = $logStore.Queue
+        Transport = 'browser'; BrowserPid = 0; LogQueue = $logStore.Queue
     })
 
 $worker = @'

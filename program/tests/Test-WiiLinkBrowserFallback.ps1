@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $programDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -30,6 +30,14 @@ Assert-True (-not (Test-WiiLinkBrowserFallbackRequired -SelectedTransport direct
 Write-Host '== UI transport mapping =='
 Assert-True ((Get-WiiLinkTransportComboIndex -Transport direct) -eq 0) 'Direct API must map to selector index 0.'
 Assert-True ((Get-WiiLinkTransportComboIndex -Transport browser) -eq 1) 'Chrome/Edge must map to selector index 1.'
+
+Write-Host '== Chrome or Edge startup default =='
+$viewerCommon = Get-Content -LiteralPath (Join-Path $programDir 'lib\ViewerCommon.ps1') -Raw
+$standaloneDefault = Get-Content -LiteralPath (Join-Path $programDir 'WiiLink-PlayerList.ps1') -Raw
+$unifiedDefault = Get-Content -LiteralPath (Join-Path $programDir 'MPH-Unified.ps1') -Raw
+Assert-True ($viewerCommon -match '\$combo\.SelectedIndex\s*=\s*1') 'The transport selector must initially show Chrome/Edge.'
+Assert-True ($standaloneDefault -match "Transport\s*=\s*'browser';\s*BrowserPid") 'Standalone WiiLink must start with Chrome/Edge.'
+Assert-True ($unifiedDefault -match "WiiLinkTransport\s*=\s*'browser';\s*WiiLinkPid") 'Unified WiiLink must start with Chrome/Edge.'
 
 Write-Host '== Deterministic Direct API diagnostics =='
 $queue = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))

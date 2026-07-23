@@ -69,7 +69,7 @@ function New-WiiLinkTransportSelector {
     $combo.BackColor = $Theme.bgDark; $combo.ForeColor = $Theme.cream; $combo.FlatStyle = 'Flat'
     [void]$combo.Items.Add($I18n.wlDirect)
     [void]$combo.Items.Add($I18n.wlBrowser)
-    $combo.SelectedIndex = 0
+    $combo.SelectedIndex = 1
 
     if ($Flow) { $Flow.Controls.Add($label); $Flow.Controls.Add($combo) }
     return @{ Label = $label; Combo = $combo; DirectText = $I18n.wlDirect; BrowserText = $I18n.wlBrowser }
