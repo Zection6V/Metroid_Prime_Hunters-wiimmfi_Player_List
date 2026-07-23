@@ -1,0 +1,212 @@
+name: Publish v2026.07.23.1
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/publish-release-v2026.07.23.1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-v2026.07.23.1
+  cancel-in-progress: false
+
+jobs:
+  validate-and-publish:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test proxy routing and fallback
+        id: proxy_tests
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-ProxyHttp.ps1
+
+      - name: Test payload logging
+        id: payload_tests
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-PayloadLogging.ps1
+
+      - name: Test logging core
+        id: logging_tests
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-LoggingCore.ps1
+
+      - name: Test syntax and live WiiLink transports
+        id: transport_tests
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-WiiLinkTransports.ps1
+
+      - name: Create tag and GitHub Release
+        id: publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = 'v2026.07.23.1';
+            const releaseName = 'v2026.07.23.1 — WiiLink Proxy Fallback Hotfix';
+            const targetCommitish = context.sha;
+            const body = [
+              '## 日本語',
+              '',
+              'WiiLink Direct APIが一部のプロキシ、PAC、WPAD環境でタイムアウトする問題を修正したホットフィックスです。',
+              '',
+              '### 修正内容',
+              '',
+              '- 未設定時にWindowsのグローバルプロキシを強制無効化していた処理を削除',
+              '- 既定の接続順を「直結 → HTTPS_PROXY/HTTP_PROXY → Windowsシステムプロキシ」に変更',
+              '- `NO_PROXY`を尊重',
+              '- Windowsシステムプロキシ、PAC、WPAD、既定のWindows資格情報に対応',
+              '- 明示プロキシと任意のユーザー名・パスワード・ドメイン指定に対応',
+              '- 直結試行を短いタイムアウトにして、必要なプロキシへ早くフォールバック',
+              '- 詳細ログへ接続計画、各経路の失敗理由、実際に成功した経路を出力',
+              '- WiiLinkのDirect API／Chrome・Edge切替とraw JSONログは従来どおり利用可能',
+              '- プロキシ経路、タイムアウト、NO_PROXY、グローバル設定非変更の回帰テストを追加',
+              '',
+              '### 既定動作',
+              '',
+              '追加設定なしで自動フォールバックが有効です。ログパネルを展開して「詳細」を有効にすると、`PROXY`ステージで経路を確認できます。',
+              '',
+              'Windowsシステムプロキシだけを使用する場合:',
+              '',
+              '```cmd',
+              'set MPH_PROXY=system',
+              '```',
+              '',
+              '明示プロキシを使用する場合:',
+              '',
+              '```cmd',
+              'set MPH_PROXY=http://proxy.example.com:8080',
+              '```',
+              '',
+              'Direct APIで解決しない場合は、WiiLink取得方式をChrome／Edgeへ切り替えてください。',
+              '',
+              '---',
+              '',
+              '## English',
+              '',
+              'This hotfix resolves WiiLink Direct API timeouts on networks that require a proxy, PAC, or WPAD configuration.',
+              '',
+              '### Changes',
+              '',
+              '- Removed the process-wide proxy disablement used by the previous direct transport',
+              '- Added automatic direct → HTTPS_PROXY/HTTP_PROXY → Windows system proxy fallback',
+              '- Added NO_PROXY handling',
+              '- Added Windows default-credential support for authenticated proxies',
+              '- Added explicit proxy and optional username/password/domain settings',
+              '- Added a short direct probe before proxy fallback',
+              '- Added detailed route-plan, failure, timeout, and successful-route diagnostics',
+              '- Preserved selectable Direct API / Chrome or Edge transports and raw JSON diagnostics',
+              '- Added deterministic regression tests for proxy routing and global proxy isolation',
+              '',
+              'No configuration is required for automatic mode. Enable Details in the diagnostic log and inspect the PROXY stage to see which route was used.'
+            ].join('\n');
+
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+              core.info(`Tag ${tag} already exists.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha: targetCommitish });
+              core.info(`Created tag ${tag} at ${targetCommitish}.`);
+            }
+
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              core.setOutput('release_url', existing.data.html_url);
+              core.info(`Release already exists: ${existing.data.html_url}`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const release = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              target_commitish: targetCommitish,
+              name: releaseName,
+              body,
+              draft: false,
+              prerelease: false,
+              make_latest: 'true'
+            });
+            core.setOutput('release_url', release.data.html_url);
+            core.notice(`Published release: ${release.data.html_url}`);
+
+      - name: Record validation and release result
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          PROXY_OUTCOME: ${{ steps.proxy_tests.outcome }}
+          PAYLOAD_OUTCOME: ${{ steps.payload_tests.outcome }}
+          LOGGING_OUTCOME: ${{ steps.logging_tests.outcome }}
+          TRANSPORT_OUTCOME: ${{ steps.transport_tests.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = 'v2026.07.23.1';
+            const path = '.github/release-status/v2026.07.23.1.json';
+            let release = null;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const status = {
+              published: Boolean(release) && !release.draft,
+              tag,
+              name: release ? release.name : 'v2026.07.23.1 — WiiLink Proxy Fallback Hotfix',
+              url: release ? release.html_url : null,
+              releaseId: release ? release.id : null,
+              draft: release ? release.draft : null,
+              prerelease: release ? release.prerelease : null,
+              targetCommit: context.sha,
+              tests: {
+                proxy: process.env.PROXY_OUTCOME,
+                payload: process.env.PAYLOAD_OUTCOME,
+                logging: process.env.LOGGING_OUTCOME,
+                transports: process.env.TRANSPORT_OUTCOME
+              },
+              publishOutcome: process.env.PUBLISH_OUTCOME,
+              verifiedAt: new Date().toISOString()
+            };
+            const content = Buffer.from(JSON.stringify(status, null, 2) + '\n').toString('base64');
+            let sha;
+            try {
+              sha = (await github.rest.repos.getContent({ owner, repo, path, ref: 'master' })).data.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path,
+              message: `Record ${tag} validation and release result`,
+              content,
+              sha,
+              branch: 'master'
+            });
