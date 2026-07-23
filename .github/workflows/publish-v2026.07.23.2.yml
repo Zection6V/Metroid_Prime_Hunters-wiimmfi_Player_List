@@ -1,0 +1,267 @@
+name: Publish v2026.07.23.2
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/publish-v2026.07.23.2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-v2026.07.23.2
+  cancel-in-progress: false
+
+jobs:
+  validate-and-publish:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      RELEASE_TAG: v2026.07.23.2
+      RELEASE_TITLE: v2026.07.23.2 — Direct API Network Diagnostics
+      ASSET_NAME: Metroid_Prime_Hunters-wiimmfi_Player_List.zip
+
+    steps:
+      - name: Checkout immutable source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate PowerShell syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failures = @()
+          Get-ChildItem -LiteralPath .\program -Recurse -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($error in @($errors)) {
+              $failures += ('{0}:{1}: {2}' -f $_.FullName, $error.Extent.StartLineNumber, $error.Message)
+            }
+          }
+          if ($failures.Count -gt 0) { throw ($failures -join [Environment]::NewLine) }
+          Write-Host 'All PowerShell files parsed successfully.'
+
+      - name: Run deterministic release tests
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(
+            '.\program\tests\Test-ProxyHttp.ps1',
+            '.\program\tests\Test-WiiLinkBrowserFallback.ps1',
+            '.\program\tests\Test-WiiLinkGroupParsing.ps1',
+            '.\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1',
+            '.\program\tests\Test-NetworkDiagnostics.ps1',
+            '.\program\tests\Test-PayloadLogging.ps1',
+            '.\program\tests\Test-LoggingCore.ps1'
+          )
+          foreach ($test in $tests) {
+            Write-Host "=== $test ==="
+            & $test
+            if ($LASTEXITCODE -ne 0) { throw "Test failed: $test" }
+          }
+
+      - name: Package and verify program contents
+        id: package
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assetPath = Join-Path $env:GITHUB_WORKSPACE $env:ASSET_NAME
+          $programRoot = Join-Path $env:GITHUB_WORKSPACE 'program'
+          $verifyRoot = Join-Path $env:RUNNER_TEMP 'mph-v2026-07-23-2-verify'
+          Remove-Item -LiteralPath $assetPath -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+          Compress-Archive -Path (Join-Path $programRoot '*') -DestinationPath $assetPath -CompressionLevel Optimal -Force
+          Expand-Archive -LiteralPath $assetPath -DestinationPath $verifyRoot -Force
+
+          if (Test-Path -LiteralPath (Join-Path $verifyRoot 'program') -PathType Container) {
+            throw 'ZIP layout is invalid: program directory exists at ZIP root.'
+          }
+          $required = @(
+            'MPH-Unified.ps1',
+            'Wiimmfi-PlayerList.ps1',
+            'WiiLink-PlayerList.ps1',
+            'Run MPH Unified.bat',
+            'lib\ProxyHttp.ps1',
+            'lib\WiiLinkFallback.ps1',
+            'lib\NetworkDiagnostics.ps1',
+            'tests\Test-NetworkDiagnostics.ps1',
+            'tests\Test-WiiLinkBrowserFallback.ps1',
+            'tests\Test-WiiLinkStatsOnlyDisplay.ps1'
+          )
+          foreach ($relativePath in $required) {
+            if (-not (Test-Path -LiteralPath (Join-Path $verifyRoot $relativePath) -PathType Leaf)) {
+              throw "ZIP is not current; missing $relativePath"
+            }
+          }
+
+          $zip = Get-Item -LiteralPath $assetPath
+          $sha256 = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset_size=$($zip.Length)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "asset_sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Verified current ZIP: size=$($zip.Length), sha256=$sha256"
+
+      - name: Create new immutable Release and Asset
+        id: release
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          ASSET_PATH: ${{ steps.package.outputs.asset_path }}
+          ASSET_SIZE: ${{ steps.package.outputs.asset_size }}
+          ASSET_SHA256: ${{ steps.package.outputs.asset_sha256 }}
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = process.env.RELEASE_TAG;
+            const targetSha = process.env.TARGET_SHA;
+            const assetName = process.env.ASSET_NAME;
+            const assetPath = process.env.ASSET_PATH;
+            const expectedSize = Number(process.env.ASSET_SIZE);
+
+            try {
+              await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              throw new Error(`Release ${tag} already exists. It will not be overwritten.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            try {
+              await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+              throw new Error(`Tag ${tag} already exists. It will not be moved.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const data = fs.readFileSync(assetPath);
+            if (data.length !== expectedSize) {
+              throw new Error(`Local ZIP size mismatch: expected=${expectedSize}, actual=${data.length}`);
+            }
+
+            const body = [
+              '## 日本語',
+              '',
+              'Direct APIのタイムアウト原因を調査するための詳細ネットワーク診断を追加しました。',
+              '',
+              '- `NETDIAG`ログでDNS、IPv4/IPv6 TCP 443、TLS、証明書、WinINet、WinHTTP、システムプロキシ解決結果を記録',
+              '- Direct APIの全経路失敗時に診断をバックグラウンド実行し、Chrome/Edgeへ自動フォールバック',
+              '- `stats.mprimeds.online > 0`かつ`groups = 0`でも「オンラインなし」と誤表示しないよう修正',
+              '- 直結、環境変数プロキシ、Windowsシステムプロキシの診断ログを強化',
+              '- ZIP直下には`program`配下の内容のみを格納',
+              '',
+              'このReleaseとAssetは公開後に上書きしません。',
+              '',
+              '## English',
+              '',
+              '- Added detailed `NETDIAG` output for DNS, IPv4/IPv6 TCP 443, TLS, certificates, WinINet, WinHTTP, and system proxy resolution.',
+              '- Runs diagnostics in the background after all Direct API routes fail, then automatically falls back to Chrome/Edge.',
+              '- Fixed the stats-only WiiLink display when `mprimeds.online` is non-zero and `groups` is zero.',
+              '- Strengthened proxy-route diagnostics.',
+              '- The ZIP root contains the contents of `program`, not a wrapping `program` directory.',
+              '',
+              `Target commit: ${targetSha}`,
+              `Asset SHA-256: ${process.env.ASSET_SHA256}`
+            ].join('\n');
+
+            let release;
+            try {
+              release = (await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: targetSha,
+                name: process.env.RELEASE_TITLE,
+                body,
+                draft: false,
+                prerelease: false,
+                make_latest: 'true'
+              })).data;
+
+              const uploaded = (await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.id,
+                name: assetName,
+                data,
+                headers: {
+                  'content-type': 'application/zip',
+                  'content-length': data.length
+                }
+              })).data;
+
+              if (uploaded.name !== assetName || uploaded.size !== data.length) {
+                throw new Error(`Uploaded Asset mismatch: name=${uploaded.name}, size=${uploaded.size}`);
+              }
+              core.setOutput('release_id', String(release.id));
+              core.setOutput('release_url', release.html_url);
+              core.setOutput('asset_id', String(uploaded.id));
+              core.setOutput('asset_url', uploaded.browser_download_url);
+              core.notice(`Published ${tag}: ${release.html_url}`);
+            } catch (error) {
+              if (release) {
+                try { await github.rest.repos.deleteRelease({ owner, repo, release_id: release.id }); } catch (_) {}
+                try { await github.rest.git.deleteRef({ owner, repo, ref: `tags/${tag}` }); } catch (_) {}
+              }
+              throw error;
+            }
+
+      - name: Record verified Release result
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          RELEASE_URL: ${{ steps.release.outputs.release_url }}
+          ASSET_ID: ${{ steps.release.outputs.asset_id }}
+          ASSET_URL: ${{ steps.release.outputs.asset_url }}
+          ASSET_SIZE: ${{ steps.package.outputs.asset_size }}
+          ASSET_SHA256: ${{ steps.package.outputs.asset_sha256 }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const path = `.github/release-status/${process.env.RELEASE_TAG}.json`;
+            const status = {
+              published: true,
+              immutable: true,
+              tag: process.env.RELEASE_TAG,
+              name: process.env.RELEASE_TITLE,
+              url: process.env.RELEASE_URL,
+              releaseId: Number(process.env.RELEASE_ID),
+              targetCommit: process.env.TARGET_SHA,
+              tests: {
+                powershellSyntax: 'success',
+                proxy: 'success',
+                browserFallback: 'success',
+                groupsParsing: 'success',
+                statsOnlyDisplay: 'success',
+                networkDiagnostics: 'success',
+                payloadLogging: 'success',
+                loggingCore: 'success'
+              },
+              asset: {
+                uploaded: true,
+                id: Number(process.env.ASSET_ID),
+                name: process.env.ASSET_NAME,
+                size: Number(process.env.ASSET_SIZE),
+                sha256: process.env.ASSET_SHA256,
+                layout: 'program-contents-at-zip-root',
+                downloadUrl: process.env.ASSET_URL
+              },
+              verifiedAt: new Date().toISOString()
+            };
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path,
+              message: `Record immutable ${process.env.RELEASE_TAG} result`,
+              content: Buffer.from(JSON.stringify(status, null, 2) + '\n').toString('base64'),
+              branch: 'master'
+            });
