@@ -1,8 +1,32 @@
 <#
-    WiiLinkFallback.ps1 — Direct API 失敗時のブラウザ退避ポリシー
+    WiiLinkFallback.ps1 - policy and diagnostics for Direct API failures.
 
-    取得やUI操作そのものは担当せず、取得結果からChrome/Edgeへ切り替えるべきかを判定する。
+    The viewer keeps Direct API as the first choice. When every HTTP route is
+    exhausted, a one-time background diagnostic is started and the viewer
+    changes to Chrome/Edge.
 #>
+
+$networkDiagnosticsPath = Join-Path $PSScriptRoot 'NetworkDiagnostics.ps1'
+if (Test-Path -LiteralPath $networkDiagnosticsPath -PathType Leaf) {
+    . $networkDiagnosticsPath
+}
+
+function Get-WiiLinkFallbackLogQueue {
+    for ($scope = 1; $scope -le 8; $scope++) {
+        $syncVariable = Get-Variable -Name sync -Scope $scope -ErrorAction SilentlyContinue
+        if ($null -eq $syncVariable -or $null -eq $syncVariable.Value) { continue }
+        $syncObject = $syncVariable.Value
+        try {
+            if ($syncObject -is [hashtable] -and $syncObject.ContainsKey('WiiLinkLogQueue')) {
+                return $syncObject.WiiLinkLogQueue
+            }
+            if ($syncObject -is [hashtable] -and $syncObject.ContainsKey('LogQueue')) {
+                return $syncObject.LogQueue
+            }
+        } catch {}
+    }
+    return $null
+}
 
 function Test-WiiLinkBrowserFallbackRequired {
     param(
@@ -19,9 +43,18 @@ function Test-WiiLinkBrowserFallbackRequired {
     $errorText = if ($null -ne $errorProperty) { [string]$errorProperty.Value } else { '' }
     if ([string]::IsNullOrWhiteSpace($errorText)) { return $false }
 
-    # ProxyHttpが全経路を試し終えた場合だけ自動変更する。
-    # JSON解析エラーや一時的なAPIレスポンス不整合では取得方式を勝手に変えない。
-    return $errorText.StartsWith('All HTTP routes failed:', [System.StringComparison]::OrdinalIgnoreCase)
+    # Only route exhaustion starts diagnostics and changes the transport.
+    # JSON parsing or response-shape errors remain on the selected transport.
+    $fallbackRequired = $errorText.StartsWith('All HTTP routes failed:', [System.StringComparison]::OrdinalIgnoreCase)
+    if ($fallbackRequired) {
+        try {
+            $queue = Get-WiiLinkFallbackLogQueue
+            if ($null -ne $queue -and $null -ne (Get-Command Start-MphNetworkDiagnostics -ErrorAction SilentlyContinue)) {
+                [void](Start-MphNetworkDiagnostics -Url ([uri]'https://api.wfc.wiilink24.com/api/stats') -LogQueue $queue -Source 'WiiLink' -TriggerError $errorText)
+            }
+        } catch {}
+    }
+    return $fallbackRequired
 }
 
 function Get-WiiLinkTransportComboIndex {
