@@ -39,12 +39,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Test automatic Direct API to Chrome or Edge switch
+      - name: Test automatic switch and reliable NETDIAG Queue capture
         shell: powershell
         env:
           MPH_LANG: en
         run: |
           .\program\tests\Test-WiiLinkBrowserFallback.ps1
+          .\program\tests\Test-WiiLinkFallbackCapturedQueue.ps1
 
   wiilink-group-parsing:
     needs: wiilink-browser-fallback
