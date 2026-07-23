@@ -38,7 +38,7 @@ foreach ($viewer in @($standalone, $unified)) {
     Assert-True ($viewer -match 'WiiLinkFallback\.ps1') 'Viewer must load the fallback policy module.'
     Assert-True ($viewer -match 'Test-WiiLinkBrowserFallbackRequired') 'Viewer worker must evaluate fallback policy.'
     Assert-True ($viewer -match "Transport\s*=\s*'browser'") 'Viewer worker must switch the synchronized transport to browser.'
-    Assert-True ($viewer -match "Stage 'FALLBACK'") 'Viewer must record the automatic switch in diagnostics.'
+    Assert-True ($viewer -match "'WARN'\s+'FALLBACK'") 'Viewer must record the automatic switch in diagnostics.'
     Assert-True ($viewer -match 'Get-WiiLinkTransportComboIndex') 'Viewer UI selector must follow the worker-selected transport.'
 }
 
