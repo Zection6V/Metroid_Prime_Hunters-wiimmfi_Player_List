@@ -44,7 +44,7 @@ function Get-WiiLinkPropertyValue {
 
 function Add-WiiLinkGroupCandidate {
     param(
-        [Parameter(Mandatory = $true)][System.Collections.ArrayList]$List,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.ArrayList]$List,
         [AllowNull()]$Candidate,
         [string]$FallbackId = ''
     )
@@ -137,7 +137,7 @@ function Start-WiiLinkBrowser {
     try {
         $proc = Start-Process -FilePath $browser -ArgumentList $args -PassThru -WindowStyle Minimized
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'BROWSER' ("Browser started; pid={0}; port={1}; executable={2}" -f $proc.Id, $port, $browser)
-        return @{ ok = $true; proc = $proc; port = $port; browser = $browser; profile = $profile }
+        return @{ ok = $true; error = ''; proc = $proc; port = $port; browser = $browser; profile = $profile }
     } catch {
         Write-WiiLinkDiagnostic $LogQueue 'ERROR' 'BROWSER' ("Browser start failed: {0}" -f $_.Exception.Message)
         return @{ ok = $false; error = $_.Exception.Message }
