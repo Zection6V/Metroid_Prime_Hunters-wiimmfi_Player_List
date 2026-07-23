@@ -1,0 +1,18 @@
+{
+  "published": false,
+  "tag": "v2026.07.23.1",
+  "name": "v2026.07.23.1 — WiiLink Proxy Fallback Hotfix",
+  "url": null,
+  "releaseId": null,
+  "draft": null,
+  "prerelease": null,
+  "targetCommit": "b99c9af5beb1429244f1f77d6302949fa88687c9",
+  "tests": {
+    "proxy": "failure",
+    "payload": "skipped",
+    "logging": "skipped",
+    "transports": "skipped"
+  },
+  "publishOutcome": "skipped",
+  "verifiedAt": "2026-07-23T00:33:05.329Z"
+}
