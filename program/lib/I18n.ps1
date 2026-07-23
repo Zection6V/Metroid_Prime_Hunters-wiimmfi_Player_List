@@ -88,7 +88,7 @@ function Get-MphI18n {
                 logAutoScroll = 'Défilement automatique'; logDetails = 'Détails'; logCopied = 'Journal de diagnostic copié dans le presse-papiers'
                 logSource = 'Source :'; logAll = 'Tous'; logWiimmfi = 'Wiimmfi'; logWiiLink = 'WiiLink'; logApp = 'Application'
                 wlTransport = 'WiiLink via :'; wlDirect = 'API directe'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Méthode de récupération WiiLink changée en {0}'
-                wlRoomVisibilityNote = 'Remarque : WiiLink n’affiche une salle que lorsqu’au moins deux joueurs y sont présents.'
+                wlRoomVisibilityNote = "Remarque : WiiLink n'affiche une salle que lorsqu'au moins deux joueurs y sont présents."
                 intervals = [ordered]@{ '15 s' = 15000; '30 s' = 30000; '1 min' = 60000; '2 min' = 120000; '5 min' = 300000 }
                 status = @{ '0' = 'Hors ligne'; '1' = 'En ligne (en attente)'; '2' = 'Invité (Salle/Global)'; '3' = 'Recherche globale'; '4' = 'Connexion à une salle privée'; '5' = 'Hôte (Salle/Global)'; '6' = 'Hôte' }
                 mode = @{ '0' = 'Survie / Aucun'; '1' = 'Combat / Prime'; '2' = 'Défenseur / Capture'; '3' = 'Prime Hunter / Nœuds' }
