@@ -1,5 +1,5 @@
 name: Publish v2026.07.23.1
-# Validation revision: payload-newline-and-strictmode-fixes
+# Validation revision: groups-normalization
 
 on:
   push:
@@ -31,6 +31,13 @@ jobs:
           MPH_LANG: en
         run: .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-ProxyHttp.ps1 -LogPath "$env:GITHUB_WORKSPACE\proxy-test.log"
 
+      - name: Test WiiLink groups normalization
+        id: parsing_tests
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-WiiLinkGroupParsing.ps1 -LogPath "$env:GITHUB_WORKSPACE\parsing-test.log"
+
       - name: Test payload logging
         id: payload_tests
         shell: powershell
@@ -56,6 +63,7 @@ jobs:
         id: publish
         if: >-
           steps.proxy_tests.outputs.result == 'success' &&
+          steps.parsing_tests.outputs.result == 'success' &&
           steps.payload_tests.outputs.result == 'success' &&
           steps.logging_tests.outputs.result == 'success' &&
           steps.transport_tests.outputs.result == 'success'
@@ -76,8 +84,10 @@ jobs:
               '- 直結 → HTTPS_PROXY/HTTP_PROXY → Windowsシステムプロキシの自動フォールバックを追加',
               '- NO_PROXY、Windows既定資格情報、明示プロキシ認証に対応',
               '- 詳細ログのPROXYステージへ試行順、タイムアウト、失敗理由、成功経路を出力',
+              '- WiiLink groups APIの空オブジェクト、配列、ラッパー、IDマップ形式を正規化',
+              '- 部屋0件の正常応答をプロパティ不足エラーにしないよう修正',
               '- Direct APIで解決しない環境ではChrome／Edge経路を引き続き選択可能',
-              '- プロキシ経路とグローバル設定非変更の回帰テストを追加',
+              '- プロキシ経路、JSON形状、payload、ログ、実通信の回帰テストを追加',
               '',
               'Windowsシステムプロキシだけを使用する場合: `set MPH_PROXY=system`',
               '',
@@ -90,7 +100,10 @@ jobs:
               '- Removed process-wide proxy disablement',
               '- Added direct → HTTPS_PROXY/HTTP_PROXY → Windows system proxy fallback',
               '- Added NO_PROXY and default Windows proxy credentials',
-              '- Added detailed PROXY-stage diagnostics and deterministic regression tests',
+              '- Added detailed PROXY-stage diagnostics',
+              '- Normalized empty, array, wrapped, and ID-mapped groups API responses',
+              '- Prevented zero-room responses from failing under PowerShell StrictMode',
+              '- Added deterministic proxy, parsing, payload, logging, and live-transport tests',
               '- Chrome / Edge remains available as a selectable fallback transport'
             ].join('\n');
 
@@ -120,6 +133,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           PROXY_RESULT: ${{ steps.proxy_tests.outputs.result }}
+          PARSING_RESULT: ${{ steps.parsing_tests.outputs.result }}
           PAYLOAD_RESULT: ${{ steps.payload_tests.outputs.result }}
           LOGGING_RESULT: ${{ steps.logging_tests.outputs.result }}
           TRANSPORT_RESULT: ${{ steps.transport_tests.outputs.result }}
@@ -149,6 +163,7 @@ jobs:
 
             const results = {
               proxy: process.env.PROXY_RESULT || 'unknown',
+              parsing: process.env.PARSING_RESULT || 'unknown',
               payload: process.env.PAYLOAD_RESULT || 'unknown',
               logging: process.env.LOGGING_RESULT || 'unknown',
               transports: process.env.TRANSPORT_RESULT || 'unknown'
@@ -165,6 +180,7 @@ jobs:
               tests: results,
               failureLogs: {
                 proxy: readFailure(results.proxy, 'proxy-test.log'),
+                parsing: readFailure(results.parsing, 'parsing-test.log'),
                 payload: readFailure(results.payload, 'payload-test.log'),
                 logging: readFailure(results.logging, 'logging-test.log'),
                 transports: readFailure(results.transports, 'transport-test.log')
