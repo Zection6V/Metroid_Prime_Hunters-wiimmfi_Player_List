@@ -1,16 +1,36 @@
 {
-  "published": false,
+  "published": true,
   "immutable": true,
   "tag": "v2026.07.23.3",
   "name": "v2026.07.23.3 — Reliable Direct API NETDIAG",
-  "targetCommit": "11f54977d7486b451cbb1cd48b0206399f09b544",
+  "targetCommit": "b2056c43613757ec4581369ab4bcc681350fe40a",
   "outcomes": {
     "validation": "success",
     "package": "success",
-    "release": "not-run"
+    "release": "success"
   },
-  "releaseError": "message=Resource not accessible by integration\nname=HttpError\nstatus=403\nstack=HttpError: Resource not accessible by integration\n    at D:\\a\\_actions\\actions\\github-script\\v7\\dist\\index.js:9537:21\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async eval (eval at callAsyncFunction (D:\\a\\_actions\\actions\\github-script\\v7\\dist\\index.js:36187:16), <anonymous>:36:14)\n    at async main (D:\\a\\_actions\\actions\\github-script\\v7\\dist\\index.js:36285:20)\nresponse={\"message\":\"Resource not accessible by integration\",\"documentation_url\":\"https://docs.github.com/rest/releases/releases#create-a-release\",\"status\":\"403\"}",
-  "release": null,
-  "asset": null,
-  "verifiedAt": "2026-07-23T03:41:28.476Z"
+  "tests": {
+    "powershellSyntax": "success",
+    "proxy": "success",
+    "browserFallback": "success",
+    "capturedQueueDiagnostics": "success",
+    "groupsParsing": "success",
+    "statsOnlyDisplay": "success",
+    "payloadLogging": "success",
+    "loggingCore": "success"
+  },
+  "release": {
+    "id": 358444890,
+    "url": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/tag/v2026.07.23.3"
+  },
+  "asset": {
+    "uploaded": true,
+    "id": 486730502,
+    "name": "Metroid_Prime_Hunters-wiimmfi_Player_List.zip",
+    "size": 62091,
+    "sha256": "e0adbfb4fdd38fd87adb655a39b16a70999cf4f321bc69835d3d09746d376655",
+    "layout": "program-contents-at-zip-root",
+    "downloadUrl": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/download/v2026.07.23.3/Metroid_Prime_Hunters-wiimmfi_Player_List.zip"
+  },
+  "verifiedAt": "2026-07-23T03:44:15.591Z"
 }
