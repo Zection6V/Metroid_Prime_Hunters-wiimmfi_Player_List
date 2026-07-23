@@ -78,6 +78,7 @@ function New-DiagnosticLogPanel {
         Panel = $outer; Toolbar = $toolbar; LogBox = $box; Toggle = $toggle; Copy = $copy; Clear = $clear
         AutoScroll = $auto; Details = $details; SourceLabel = $sourceLabel; SourceCombo = $sourceCombo
         SourceKeys = @($sourceKeys); ExpandedHeight = $ExpandedHeight; Expanded = $false
+        RenderedKeys = @(); LastRenderMode = 'none'
     }
 }
 
@@ -95,6 +96,13 @@ function Set-DiagnosticLogExpanded {
     $LogPanel.LogBox.Visible = $Expanded
     $LogPanel.Panel.Height = if ($Expanded) { [int]$LogPanel.ExpandedHeight } else { 30 }
     $LogPanel.Toggle.Text = if ($Expanded) { $I18n.logCollapse } else { $I18n.logExpand }
+}
+
+function Get-DiagnosticLogEntryKey {
+    param($Entry)
+    if ($null -eq $Entry) { return '<null>' }
+    $ticks = try { ([datetime]$Entry.time).Ticks } catch { 0 }
+    return ('{0}|{1}|{2}|{3}|{4}' -f $ticks, [string]$Entry.source, [string]$Entry.level, [string]$Entry.stage, [string]$Entry.message)
 }
 
 function Add-DiagnosticLog {
@@ -120,11 +128,53 @@ function Add-DiagnosticLog {
 function Set-DiagnosticLogEntries {
     param($LogPanel, [array]$Entries, $Theme, [int]$MaxLines = 2000)
     $box = $LogPanel.LogBox
+    $incoming = @($Entries)
+    $keys = @($incoming | ForEach-Object { Get-DiagnosticLogEntryKey -Entry $_ })
+    $rendered = @($LogPanel.RenderedKeys)
+
+    $prefixMatches = ($rendered.Count -le $keys.Count)
+    if ($prefixMatches) {
+        for ($i = 0; $i -lt $rendered.Count; $i++) {
+            if (-not [string]::Equals([string]$rendered[$i], [string]$keys[$i], [System.StringComparison]::Ordinal)) {
+                $prefixMatches = $false
+                break
+            }
+        }
+    }
+    if ($rendered.Count -eq 0 -and $keys.Count -gt 0 -and $box.TextLength -eq 0) { $prefixMatches = $false }
+
+    if ($prefixMatches -and $rendered.Count -eq $keys.Count) {
+        $LogPanel.LastRenderMode = 'unchanged'
+        return
+    }
+
+    $selectionStart = [int]$box.SelectionStart
+    $selectionLength = [int]$box.SelectionLength
+    $autoScroll = [bool]$LogPanel.AutoScroll.Checked
     $box.SuspendLayout()
     try {
-        $box.Clear()
-        foreach ($entry in @($Entries)) { Add-DiagnosticLog -LogPanel $LogPanel -Entry $entry -Theme $Theme -MaxLines $MaxLines }
-        if ($LogPanel.AutoScroll.Checked) { $box.SelectionStart = $box.TextLength; $box.ScrollToCaret() }
+        if ($prefixMatches) {
+            for ($i = $rendered.Count; $i -lt $incoming.Count; $i++) {
+                Add-DiagnosticLog -LogPanel $LogPanel -Entry $incoming[$i] -Theme $Theme -MaxLines $MaxLines
+            }
+            $LogPanel.LastRenderMode = 'append'
+        } else {
+            $box.Clear()
+            foreach ($entry in $incoming) {
+                Add-DiagnosticLog -LogPanel $LogPanel -Entry $entry -Theme $Theme -MaxLines $MaxLines
+            }
+            $LogPanel.LastRenderMode = 'rebuild'
+        }
+
+        $LogPanel.RenderedKeys = @($keys)
+        if ($autoScroll) {
+            $box.SelectionStart = $box.TextLength
+            $box.SelectionLength = 0
+            $box.ScrollToCaret()
+        } else {
+            $box.SelectionStart = [Math]::Min($selectionStart, $box.TextLength)
+            $box.SelectionLength = [Math]::Min($selectionLength, $box.TextLength - $box.SelectionStart)
+        }
     } finally {
         $box.ResumeLayout()
     }
