@@ -46,8 +46,24 @@ jobs:
         run: |
           .\program\tests\Test-WiiLinkGroupParsing.ps1
 
-  payload-logging:
+  wiilink-stats-only-display:
     needs: wiilink-group-parsing
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test stats-only online display without groups
+        shell: powershell
+        env:
+          MPH_LANG: ja
+        run: |
+          .\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1
+
+  payload-logging:
+    needs: wiilink-stats-only-display
     runs-on: windows-latest
     timeout-minutes: 5
 
