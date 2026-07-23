@@ -83,6 +83,13 @@ function Update-WiiLinkTree {
     $selKey = if ($Tree.SelectedNode -and $Tree.SelectedNode.Tag) { $Tree.SelectedNode.Tag.Key } else { $null }
     $Tree.BeginUpdate(); $Tree.Nodes.Clear()
     $rooms = @($d.rooms)
+
+    if ($I18n.wlRoomVisibilityNote) {
+        $noteNode = $Tree.Nodes.Add([string]$I18n.wlRoomVisibilityNote)
+        $noteNode.ForeColor = $Colors.dim
+        $noteNode.Tag = @{ Key = 'wl-room-visibility-note' }
+    }
+
     if ($rooms.Count -eq 0) {
         $statsOnline = [int]$d.stats.online
         $statsActive = [int]$d.stats.active
