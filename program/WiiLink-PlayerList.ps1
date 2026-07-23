@@ -13,7 +13,9 @@ Add-Type -AssemblyName System.Drawing
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $WiiLinkLib = Join-Path $ScriptDir 'lib\WiiLinkSource.ps1'
+$WiiLinkFallbackLib = Join-Path $ScriptDir 'lib\WiiLinkFallback.ps1'
 . $WiiLinkLib
+. $WiiLinkFallbackLib
 . (Join-Path $ScriptDir 'lib\TreeRender.ps1')
 . (Join-Path $ScriptDir 'lib\ViewerCommon.ps1')
 . (Join-Path $ScriptDir 'lib\LogStore.ps1')
@@ -41,13 +43,15 @@ $form.Controls.Add($pane.Panel); $form.Controls.Add($bar.Panel); $form.Controls.
 $logStore = New-MphLogStore -Source 'WiiLink'
 $logStores = @($logStore)
 $sync = [hashtable]::Synchronized(@{
-        WiiLinkLib = $WiiLinkLib; Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'; Lang = $i18n.lang
+        WiiLinkLib = $WiiLinkLib; WiiLinkFallbackLib = $WiiLinkFallbackLib
+        Game = 'mprimeds'; Ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MPH-PlayerList'; Lang = $i18n.lang
         IntervalMs = 30000; Stop = $false; Refresh = $false; Json = $null; Seq = 0; Status = 'starting'
         Transport = 'direct'; BrowserPid = 0; LogQueue = $logStore.Queue
     })
 
 $worker = @'
 . $sync.WiiLinkLib
+. $sync.WiiLinkFallbackLib
 $browserCtx = $null
 try {
     while (-not $sync.Stop) {
@@ -68,6 +72,14 @@ try {
         } else {
             $port = if ($transport -eq 'browser') { [int]$browserCtx.port } else { 0 }
             $data = Get-WiiLinkData -Game $sync.Game -Ua $sync.Ua -Lang $sync.Lang -Transport $transport -BrowserPort $port -LogQueue $sync.LogQueue
+        }
+
+        if (Test-WiiLinkBrowserFallbackRequired -SelectedTransport $transport -Data $data) {
+            Write-WiiLinkDiagnostic $sync.LogQueue 'WARN' 'FALLBACK' ("Direct API routes failed; automatically switching to Chrome/Edge; error={0}" -f [string]$data.error)
+            $sync.Status = 'Direct API failed; switching to Chrome/Edge'
+            $sync.Transport = 'browser'
+            $sync.Refresh = $true
+            continue
         }
 
         $sync.Json = ($data | ConvertTo-Json -Depth 10 -Compress)
@@ -131,6 +143,8 @@ $script:LastSeq = -1
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 300
 $uiTimer.Add_Tick({
+        $transportIndex = Get-WiiLinkTransportComboIndex -Transport ([string]$sync.Transport)
+        if ($wlTransport.Combo.SelectedIndex -ne $transportIndex) { $wlTransport.Combo.SelectedIndex = $transportIndex }
         if ($sync.Seq -ne $script:LastSeq) {
             $script:LastSeq = $sync.Seq
             Update-WiiLinkTree -Tree $pane.Tree -Head $pane.Head -Json $sync.Json -Colors $theme.Colors -I18n $i18n
