@@ -1,4 +1,5 @@
 name: Upload program ZIP to Release Assets
+# Package layout: contents of program/ at ZIP root; validates stats-only WiiLink display before upload.
 
 on:
   push:
@@ -38,48 +39,48 @@ jobs:
         with:
           ref: ${{ env.TARGET_REF }}
 
-      - name: Package and verify program contents
+      - name: Test stats-only WiiLink display
+        shell: powershell
+        env:
+          MPH_LANG: ja
+        run: |
+          .\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1
+
+      - name: Package and verify program contents at ZIP root
         id: package
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-          $sourceDir = Join-Path $env:GITHUB_WORKSPACE 'program'
           $assetPath = Join-Path $env:GITHUB_WORKSPACE $env:ASSET_NAME
+          $programRoot = Join-Path $env:GITHUB_WORKSPACE 'program'
           $verifyRoot = Join-Path $env:RUNNER_TEMP 'mph-release-asset-verify'
-
-          if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
-            throw "Program source directory was not found: $sourceDir"
-          }
 
           Remove-Item -LiteralPath $assetPath -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath $verifyRoot -Recurse -Force -ErrorAction SilentlyContinue
 
-          # includeBaseDirectory=false: program 配下の内容を ZIP 直下へ格納する。
-          [System.IO.Compression.ZipFile]::CreateFromDirectory(
-            $sourceDir,
-            $assetPath,
-            [System.IO.Compression.CompressionLevel]::Optimal,
-            $false
-          )
+          $programItems = @(Get-ChildItem -LiteralPath $programRoot -Force)
+          if ($programItems.Count -eq 0) { throw 'program directory is empty.' }
+          Compress-Archive -Path (Join-Path $programRoot '*') -DestinationPath $assetPath -CompressionLevel Optimal -Force
 
           Expand-Archive -LiteralPath $assetPath -DestinationPath $verifyRoot -Force
+          if (Test-Path -LiteralPath (Join-Path $verifyRoot 'program') -PathType Container) {
+            throw 'Release ZIP verification failed; program directory must not exist at ZIP root.'
+          }
           $requiredFiles = @(
             'MPH-Unified.ps1',
             'Wiimmfi-PlayerList.ps1',
             'WiiLink-PlayerList.ps1',
-            'Run MPH Unified.bat',
-            'lib\WiiLinkSource.ps1'
+            'Run MPH Unified.bat'
           )
           foreach ($relativePath in $requiredFiles) {
             if (-not (Test-Path -LiteralPath (Join-Path $verifyRoot $relativePath) -PathType Leaf)) {
-              throw "Release ZIP verification failed; missing root-relative file: $relativePath"
+              throw "Release ZIP verification failed; missing root entry $relativePath"
             }
           }
-
-          if (Test-Path -LiteralPath (Join-Path $verifyRoot 'program')) {
-            throw 'Release ZIP verification failed; the ZIP must not contain a top-level program directory.'
+          foreach ($requiredDirectory in @('lib', 'tests')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $verifyRoot $requiredDirectory) -PathType Container)) {
+              throw "Release ZIP verification failed; missing root directory $requiredDirectory"
+            }
           }
 
           $file = Get-Item -LiteralPath $assetPath
@@ -174,6 +175,7 @@ jobs:
               releaseId: release.id,
               draft: release.draft,
               prerelease: release.prerelease,
+              statsOnlyDisplayTest: 'success',
               packageOutcome: 'success',
               uploadOutcome: 'success',
               asset: {
@@ -192,7 +194,7 @@ jobs:
               owner,
               repo,
               path: statusPath,
-              message: `Record ${tag} root-layout program ZIP asset`,
+              message: `Record ${tag} stats-only display ZIP asset`,
               content: Buffer.from(JSON.stringify(status, null, 2) + '\n').toString('base64'),
               sha: statusSha,
               branch: 'master'
