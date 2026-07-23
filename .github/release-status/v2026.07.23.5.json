@@ -1,23 +1,29 @@
 {
-  "published": false,
+  "published": true,
   "immutable": true,
   "tag": "v2026.07.23.5",
   "name": "v2026.07.23.5 — Unambiguous WiiLink Room Visibility Note",
-  "targetCommit": "c4f8b6f5f894fc732e3c46f2cf96b08265099ea8",
+  "targetCommit": "d4d402d0b7fb0a07787bf89573222e5dd4e117d0",
   "outcomes": {
     "validation": "success",
-    "package": "not-run",
-    "release": "not-run"
+    "package": "success",
+    "release": "success"
   },
   "features": {
     "roomVisibilityWording": "each-room-contains-at-least-two-players"
   },
-  "failureLogsBase64": {
-    "validation": null,
-    "package": null,
-    "release": null
+  "release": {
+    "id": 358484367,
+    "url": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/tag/v2026.07.23.5"
   },
-  "release": null,
-  "asset": null,
-  "verifiedAt": "2026-07-23T05:19:19.902Z"
+  "asset": {
+    "uploaded": true,
+    "id": 486834728,
+    "name": "Metroid_Prime_Hunters-wiimmfi_Player_List.zip",
+    "size": 67204,
+    "sha256": "158c91f7a4c3ea2734468621f668eceee5655e4a5789aa6db566eeae405797ad",
+    "layout": "program-contents-at-zip-root",
+    "downloadUrl": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/download/v2026.07.23.5/Metroid_Prime_Hunters-wiimmfi_Player_List.zip"
+  },
+  "verifiedAt": "2026-07-23T06:03:53.947Z"
 }
