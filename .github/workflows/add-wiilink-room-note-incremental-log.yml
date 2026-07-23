@@ -1,0 +1,308 @@
+name: Add WiiLink room note and incremental log rendering
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/add-wiilink-room-note-incremental-log.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Patch room visibility note and incremental log rendering
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          from pathlib import Path
+
+          root = Path.cwd()
+
+          # Add a localized explanation of WiiLink room-list visibility.
+          i18n_path = root / 'program/lib/I18n.ps1'
+          i18n = i18n_path.read_text(encoding='utf-8-sig')
+          translations = {
+              "                wlTransport = 'WiiLink取得:'; wlDirect = '直接API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink取得方式を {0} に変更しました'":
+                  "                wlTransport = 'WiiLink取得:'; wlDirect = '直接API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink取得方式を {0} に変更しました'\n                wlRoomVisibilityNote = '※ WiiLinkの仕様上、部屋一覧は2人以上いる場合のみ表示されます。'",
+              "                wlTransport = 'WiiLink über:'; wlDirect = 'Direkte API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink-Abrufmethode wurde auf {0} geändert'":
+                  "                wlTransport = 'WiiLink über:'; wlDirect = 'Direkte API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink-Abrufmethode wurde auf {0} geändert'\n                wlRoomVisibilityNote = 'Hinweis: WiiLink zeigt einen Raum erst an, wenn mindestens zwei Spieler darin sind.'",
+              "                wlTransport = 'WiiLink via :'; wlDirect = 'API directe'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Méthode de récupération WiiLink changée en {0}'":
+                  "                wlTransport = 'WiiLink via :'; wlDirect = 'API directe'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Méthode de récupération WiiLink changée en {0}'\n                wlRoomVisibilityNote = 'Remarque : WiiLink n’affiche une salle que lorsqu’au moins deux joueurs y sont présents.'",
+              "                wlTransport = 'WiiLink tramite:'; wlDirect = 'API diretta'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Metodo di acquisizione WiiLink cambiato in {0}'":
+                  "                wlTransport = 'WiiLink tramite:'; wlDirect = 'API diretta'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Metodo di acquisizione WiiLink cambiato in {0}'\n                wlRoomVisibilityNote = 'Nota: WiiLink mostra una stanza solo quando sono presenti almeno due giocatori.'",
+              "                wlTransport = 'WiiLink mediante:'; wlDirect = 'API directa'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Método de obtención de WiiLink cambiado a {0}'":
+                  "                wlTransport = 'WiiLink mediante:'; wlDirect = 'API directa'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'Método de obtención de WiiLink cambiado a {0}'\n                wlRoomVisibilityNote = 'Nota: WiiLink solo muestra una sala cuando hay al menos dos jugadores.'",
+              "                wlTransport = 'WiiLink via:'; wlDirect = 'Direct API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink transport changed to {0}'":
+                  "                wlTransport = 'WiiLink via:'; wlDirect = 'Direct API'; wlBrowser = 'Chrome/Edge'; wlTransportChanged = 'WiiLink transport changed to {0}'\n                wlRoomVisibilityNote = 'Note: WiiLink lists a room only when at least two players are present.'",
+          }
+          for old, new in translations.items():
+              count = i18n.count(old)
+              if count != 1:
+                  raise RuntimeError(f'I18n anchor count for {old!r}: {count}')
+              i18n = i18n.replace(old, new)
+          i18n_path.write_text(i18n, encoding='utf-8-sig')
+
+          # Show the explanation as the first WiiLink tree row.
+          tree_path = root / 'program/lib/TreeRender.ps1'
+          tree = tree_path.read_text(encoding='utf-8-sig')
+          tree_anchor = "    $rooms = @($d.rooms)\n    if ($rooms.Count -eq 0) {"
+          tree_insert = """    $rooms = @($d.rooms)
+              if ($I18n.wlRoomVisibilityNote) {
+                  $noteNode = $Tree.Nodes.Add([string]$I18n.wlRoomVisibilityNote)
+                  $noteNode.ForeColor = $Colors.dim
+                  $noteNode.Tag = @{ Key = 'wl-room-visibility-note' }
+              }
+              if ($rooms.Count -eq 0) {""".replace('\n              ', '\n')
+          if tree.count(tree_anchor) != 1:
+              raise RuntimeError(f'TreeRender room anchor count: {tree.count(tree_anchor)}')
+          tree_path.write_text(tree.replace(tree_anchor, tree_insert), encoding='utf-8-sig')
+
+          # Render only newly added log entries during normal polling updates.
+          diag_path = root / 'program/lib/DiagnosticLogView.ps1'
+          diag = diag_path.read_text(encoding='utf-8-sig')
+          return_anchor = "        SourceKeys = @($sourceKeys); ExpandedHeight = $ExpandedHeight; Expanded = $false\n    }"
+          return_replacement = "        SourceKeys = @($sourceKeys); ExpandedHeight = $ExpandedHeight; Expanded = $false\n        RenderedKeys = @(); LastRenderMode = 'none'\n    }"
+          if diag.count(return_anchor) != 1:
+              raise RuntimeError(f'Diagnostic panel return anchor count: {diag.count(return_anchor)}')
+          diag = diag.replace(return_anchor, return_replacement)
+
+          add_anchor = 'function Add-DiagnosticLog {'
+          helper = r'''function Get-DiagnosticLogEntryKey {
+              param($Entry)
+              if ($null -eq $Entry) { return '<null>' }
+              $ticks = try { ([datetime]$Entry.time).Ticks } catch { 0 }
+              return ('{0}|{1}|{2}|{3}|{4}' -f $ticks, [string]$Entry.source, [string]$Entry.level, [string]$Entry.stage, [string]$Entry.message)
+          }
+
+          '''.replace('\n          ', '\n')
+          if diag.count(add_anchor) != 1:
+              raise RuntimeError(f'Add-DiagnosticLog anchor count: {diag.count(add_anchor)}')
+          diag = diag.replace(add_anchor, helper + add_anchor)
+
+          set_start = diag.find('function Set-DiagnosticLogEntries {')
+          if set_start < 0:
+              raise RuntimeError('Set-DiagnosticLogEntries was not found.')
+          new_set = r'''function Set-DiagnosticLogEntries {
+              param($LogPanel, [array]$Entries, $Theme, [int]$MaxLines = 2000)
+              $box = $LogPanel.LogBox
+              $incoming = @($Entries)
+              $keys = @($incoming | ForEach-Object { Get-DiagnosticLogEntryKey -Entry $_ })
+              $rendered = @($LogPanel.RenderedKeys)
+
+              $prefixMatches = ($rendered.Count -le $keys.Count)
+              if ($prefixMatches) {
+                  for ($i = 0; $i -lt $rendered.Count; $i++) {
+                      if (-not [string]::Equals([string]$rendered[$i], [string]$keys[$i], [System.StringComparison]::Ordinal)) {
+                          $prefixMatches = $false
+                          break
+                      }
+                  }
+              }
+
+              if ($prefixMatches -and $rendered.Count -eq $keys.Count) {
+                  $LogPanel.LastRenderMode = 'unchanged'
+                  return
+              }
+
+              $selectionStart = [int]$box.SelectionStart
+              $selectionLength = [int]$box.SelectionLength
+              $autoScroll = [bool]$LogPanel.AutoScroll.Checked
+              $box.SuspendLayout()
+              try {
+                  if ($prefixMatches) {
+                      for ($i = $rendered.Count; $i -lt $incoming.Count; $i++) {
+                          Add-DiagnosticLog -LogPanel $LogPanel -Entry $incoming[$i] -Theme $Theme -MaxLines $MaxLines
+                      }
+                      $LogPanel.LastRenderMode = 'append'
+                  } else {
+                      $box.Clear()
+                      foreach ($entry in $incoming) {
+                          Add-DiagnosticLog -LogPanel $LogPanel -Entry $entry -Theme $Theme -MaxLines $MaxLines
+                      }
+                      $LogPanel.LastRenderMode = 'rebuild'
+                  }
+
+                  $LogPanel.RenderedKeys = @($keys)
+                  if ($autoScroll) {
+                      $box.SelectionStart = $box.TextLength
+                      $box.SelectionLength = 0
+                      $box.ScrollToCaret()
+                  } else {
+                      $box.SelectionStart = [Math]::Min($selectionStart, $box.TextLength)
+                      $box.SelectionLength = [Math]::Min($selectionLength, $box.TextLength - $box.SelectionStart)
+                  }
+              } finally {
+                  $box.ResumeLayout()
+              }
+          }
+          '''.replace('\n          ', '\n').lstrip()
+          diag_path.write_text(diag[:set_start] + new_set, encoding='utf-8-sig')
+
+          # Update stats-only rendering expectations because the explanatory row is now always present.
+          stats_test_path = root / 'program/tests/Test-WiiLinkStatsOnlyDisplay.ps1'
+          stats_test = stats_test_path.read_text(encoding='utf-8-sig')
+          replacements = {
+              "    Assert-True ($tree.Nodes.Count -eq 1) 'Stats-only response must render one summary node.'":
+                  "    Assert-True ($tree.Nodes.Count -eq 2) 'Stats-only response must render the room-visibility note and one summary node.'",
+              "    Assert-True ([string]$tree.Nodes[0].Text -match ('{0}:\\s*1' -f [regex]::Escape([string]$i18n.wlOn))) 'Summary node must show the stats online count.'":
+                  "    Assert-True ([string]$tree.Nodes[0].Text -eq [string]$i18n.wlRoomVisibilityNote) 'The first node must explain WiiLink room visibility.'\n    Assert-True ([string]$tree.Nodes[1].Text -match ('{0}:\\s*1' -f [regex]::Escape([string]$i18n.wlOn))) 'Summary node must show the stats online count.'",
+              "    Assert-True ([string]$tree.Nodes[0].Text -notmatch [regex]::Escape([string]$i18n.nobody)) 'Stats-only response must not display nobody-online text.'":
+                  "    Assert-True ([string]$tree.Nodes[1].Text -notmatch [regex]::Escape([string]$i18n.nobody)) 'Stats-only response must not display nobody-online text.'",
+              "    Assert-True ([string]$tree.Nodes[0].Tag.Key -eq 'wl-stats') 'Stats-only summary must use the stable wl-stats node key.'":
+                  "    Assert-True ([string]$tree.Nodes[1].Tag.Key -eq 'wl-stats') 'Stats-only summary must use the stable wl-stats node key.'",
+              "    Assert-True ($tree.Nodes.Count -eq 1) 'Empty response must render one placeholder node.'":
+                  "    Assert-True ($tree.Nodes.Count -eq 2) 'Empty response must render the room-visibility note and one placeholder node.'",
+              "    Assert-True ([string]$tree.Nodes[0].Text -eq [string]$i18n.nobody) 'All-zero stats must keep the nobody-online placeholder.'":
+                  "    Assert-True ([string]$tree.Nodes[0].Text -eq [string]$i18n.wlRoomVisibilityNote) 'Empty response must retain the room-visibility explanation.'\n    Assert-True ([string]$tree.Nodes[1].Text -eq [string]$i18n.nobody) 'All-zero stats must keep the nobody-online placeholder.'",
+          }
+          for old, new in replacements.items():
+              count = stats_test.count(old)
+              if count != 1:
+                  raise RuntimeError(f'Stats-only test anchor count for {old!r}: {count}')
+              stats_test = stats_test.replace(old, new)
+          stats_test_path.write_text(stats_test, encoding='utf-8-sig')
+
+          # Add a deterministic incremental-rendering regression test.
+          incremental_test = root / 'program/tests/Test-DiagnosticLogIncremental.ps1'
+          incremental_test.write_text(r'''$ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $programDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          . (Join-Path $programDir 'lib\ViewerCommon.ps1')
+          . (Join-Path $programDir 'lib\DiagnosticLogView.ps1')
+
+          function Assert-True {
+              param([bool]$Condition, [string]$Message)
+              if (-not $Condition) { throw "ASSERT FAILED: $Message" }
+          }
+
+          function New-TestEntry {
+              param([int]$Second, [string]$Message)
+              [pscustomobject]@{
+                  time = [datetime]::new(2026, 7, 23, 12, 0, $Second, [datetimekind]::Local)
+                  source = 'WiiLink'
+                  level = 'INFO'
+                  stage = 'TEST'
+                  message = $Message
+              }
+          }
+
+          $theme = Get-MphTheme
+          $i18n = Get-MphI18n -Lang 'en'
+          $panel = New-DiagnosticLogPanel -Theme $theme -I18n $i18n -SourceOptions @(@{ Key = 'WiiLink'; Text = 'WiiLink' })
+          try {
+              $first = @(New-TestEntry 1 'first', New-TestEntry 2 'second')
+              Set-DiagnosticLogEntries -LogPanel $panel -Entries $first -Theme $theme
+              Assert-True ($panel.LastRenderMode -eq 'rebuild') 'Initial rendering must build the log once.'
+              Assert-True ($panel.RenderedKeys.Count -eq 2) 'Initial rendering must track two entries.'
+
+              $panel.AutoScroll.Checked = $false
+              $panel.LogBox.SelectionStart = 5
+              $savedSelection = $panel.LogBox.SelectionStart
+              $second = @($first) + @(New-TestEntry 3 'third')
+              Set-DiagnosticLogEntries -LogPanel $panel -Entries $second -Theme $theme
+              Assert-True ($panel.LastRenderMode -eq 'append') 'Normal polling must append only new entries.'
+              Assert-True ($panel.LogBox.SelectionStart -eq $savedSelection) 'Appending with auto-scroll disabled must preserve the current position.'
+              Assert-True ($panel.RenderedKeys.Count -eq 3) 'Append rendering must track all three entries.'
+
+              Set-DiagnosticLogEntries -LogPanel $panel -Entries $second -Theme $theme
+              Assert-True ($panel.LastRenderMode -eq 'unchanged') 'An unchanged snapshot must not redraw the log.'
+
+              $panel.AutoScroll.Checked = $true
+              $third = @($second) + @(New-TestEntry 4 'fourth')
+              Set-DiagnosticLogEntries -LogPanel $panel -Entries $third -Theme $theme
+              Assert-True ($panel.LastRenderMode -eq 'append') 'Auto-scroll updates must still append incrementally.'
+              Assert-True ($panel.LogBox.SelectionStart -eq $panel.LogBox.TextLength) 'Auto-scroll must move to the latest entry only once after appending.'
+
+              $filtered = @($third | Select-Object -Last 2)
+              Set-DiagnosticLogEntries -LogPanel $panel -Entries $filtered -Theme $theme
+              Assert-True ($panel.LastRenderMode -eq 'rebuild') 'Filter or history changes must rebuild the displayed snapshot.'
+
+              Write-Host 'RESULT: SUCCESS'
+          } finally {
+              try { $panel.Panel.Dispose() } catch {}
+          }
+          '''.replace('\n          ', '\n').lstrip(), encoding='utf-8-sig')
+
+          # Include the new test in regular CI.
+          workflow_path = root / '.github/workflows/wiilink-transport-tests.yml'
+          workflow = workflow_path.read_text(encoding='utf-8')
+          ci_anchor = "          .\\program\\tests\\Test-LoggingCore.ps1"
+          ci_replacement = ci_anchor + "\n          .\\program\\tests\\Test-DiagnosticLogIncremental.ps1"
+          if workflow.count(ci_anchor) != 1:
+              raise RuntimeError(f'CI logging test anchor count: {workflow.count(ci_anchor)}')
+          workflow_path.write_text(workflow.replace(ci_anchor, ci_replacement), encoding='utf-8')
+
+          # Document the room-list rule and browser default.
+          readme_path = root / 'README.md'
+          readme = readme_path.read_text(encoding='utf-8')
+          readme_anchor = 'The browser transport is useful when local security software, TLS interception, or a network proxy blocks direct PowerShell requests.'
+          readme_replacement = readme_anchor + "\n\n**Chrome / Edge is the default WiiLink transport.** Direct API remains available as a manual option. WiiLink only exposes a room in the room list when at least two players are present, so the online count may be nonzero even when no room row is shown."
+          if readme.count(readme_anchor) != 1:
+              raise RuntimeError(f'README WiiLink anchor count: {readme.count(readme_anchor)}')
+          readme_path.write_text(readme.replace(readme_anchor, readme_replacement), encoding='utf-8')
+          '@ | python -
+
+          git rm -- '.github/workflows/add-wiilink-room-note-incremental-log.yml'
+
+      - name: Validate PowerShell syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $failures = @()
+          Get-ChildItem -LiteralPath .\program -Recurse -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($error in @($errors)) {
+              $failures += ('{0}:{1}: {2}' -f $_.FullName, $error.Extent.StartLineNumber, $error.Message)
+            }
+          }
+          if ($failures.Count -gt 0) { throw ($failures -join [Environment]::NewLine) }
+
+      - name: Run deterministic tests
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($test in @(
+            '.\program\tests\Test-ProxyHttp.ps1',
+            '.\program\tests\Test-WiiLinkBrowserFallback.ps1',
+            '.\program\tests\Test-WiiLinkFallbackCapturedQueue.ps1',
+            '.\program\tests\Test-WiiLinkGroupParsing.ps1',
+            '.\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1',
+            '.\program\tests\Test-PayloadLogging.ps1',
+            '.\program\tests\Test-LoggingCore.ps1',
+            '.\program\tests\Test-DiagnosticLogIncremental.ps1'
+          )) {
+            Write-Host "=== $test ==="
+            & $test
+          }
+
+      - name: Commit tested changes
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- README.md program/lib/I18n.ps1 program/lib/TreeRender.ps1 program/lib/DiagnosticLogView.ps1
+          git add -- program/tests/Test-WiiLinkStatsOnlyDisplay.ps1 program/tests/Test-DiagnosticLogIncremental.ps1
+          git add -- .github/workflows/wiilink-transport-tests.yml
+          git add -u -- '.github/workflows/add-wiilink-room-note-incremental-log.yml'
+          git commit -m 'Add WiiLink room visibility note and incremental log rendering'
+          git push origin HEAD:master
