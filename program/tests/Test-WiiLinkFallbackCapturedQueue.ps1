@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $programDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -51,10 +51,33 @@ Write-Host '== Unified worker Queue capture =='
 $unifiedQueue = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
 $sync = [hashtable]::Synchronized(@{ WiiLinkLogQueue = $unifiedQueue })
 . (Join-Path $programDir 'lib\WiiLinkFallback.ps1')
+
+# Reloading WiiLinkFallback also reloads the real diagnostics implementation.
+# Restore the deterministic stub before checking which Queue the fallback captured.
 $script:ObservedQueue = $null
+$script:ObservedTrigger = ''
+function Invoke-MphNetworkDiagnostics {
+    param(
+        [uri]$Url,
+        [AllowNull()]$LogQueue,
+        [string]$Source,
+        [string]$TriggerError
+    )
+    $script:ObservedQueue = $LogQueue
+    $script:ObservedTrigger = $TriggerError
+    $LogQueue.Enqueue(@{
+            time = [datetime]::Now
+            source = $Source
+            level = 'INFO'
+            stage = 'NETDIAG'
+            message = 'stub diagnostics'
+        })
+    return [pscustomobject]@{ LikelyCause = 'stub' }
+}
 
 Assert-True (Test-WiiLinkBrowserFallbackRequired -SelectedTransport direct -Data $failure) 'Unified route exhaustion must trigger fallback.'
 Assert-True ([object]::ReferenceEquals($unifiedQueue, $script:ObservedQueue)) 'Unified WiiLink Queue must be captured when the fallback module is loaded.'
+Assert-True ($script:ObservedTrigger -eq $failure.error) 'Unified diagnostics must receive the original route failure.'
 
 Write-Host '== Explicit Queue takes precedence =='
 $explicitQueue = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
