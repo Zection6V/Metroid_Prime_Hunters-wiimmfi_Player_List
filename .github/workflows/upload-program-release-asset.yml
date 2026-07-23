@@ -1,5 +1,5 @@
 name: Upload program ZIP to Release Assets
-# Package layout: contents of program/ at ZIP root; validates stats-only WiiLink display before upload.
+# Package layout: contents of program/ at ZIP root; validates ASCII-safe stats-only WiiLink display before upload.
 
 on:
   push:
@@ -43,7 +43,7 @@ jobs:
         id: stats_only_test
         shell: powershell
         env:
-          MPH_LANG: ja
+          MPH_LANG: en
         run: |
           .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1 -LogPath "$env:GITHUB_WORKSPACE\stats-only-display-test.log"
 
