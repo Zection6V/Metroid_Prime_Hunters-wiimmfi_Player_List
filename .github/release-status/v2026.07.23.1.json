@@ -1,5 +1,5 @@
 {
-  "published": false,
+  "published": true,
   "tag": "v2026.07.23.1",
   "name": "v2026.07.23.1 — WiiLink Proxy Fallback Hotfix",
   "url": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/tag/v2026.07.23.1",
@@ -14,15 +14,15 @@
     "logging": "success",
     "transports": "success"
   },
-  "packageOutcome": "skipped",
+  "packageOutcome": "success",
   "publishOutcome": "success",
-  "uploadOutcome": "skipped",
+  "uploadOutcome": "success",
   "asset": {
     "uploaded": true,
-    "id": 486626365,
+    "id": 486639201,
     "name": "Metroid_Prime_Hunters-wiimmfi_Player_List.zip",
-    "size": 50765,
-    "sha256": "a80df26c0a23a1cd275fc807a98c5272e2970947a48afbf65a95314dc929f467",
+    "size": 53198,
+    "sha256": "11756ce8666363907352d2eced840f52982beba2ffcccdc4d04e9ff0b5ef8541",
     "layout": "program-contents-at-zip-root",
     "downloadUrl": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/download/v2026.07.23.1/Metroid_Prime_Hunters-wiimmfi_Player_List.zip"
   },
@@ -34,9 +34,9 @@
     "transports": null
   },
   "verifiedAt": "2026-07-23T01:01:20.648Z",
-  "assetVerifiedAt": "2026-07-23T01:38:13.859Z",
+  "assetVerifiedAt": "2026-07-23T01:55:40.613Z",
   "statsOnlyDisplayTest": "success",
   "statsOnlyDisplayFailureLog": null,
-  "browserFallbackTest": "failure",
-  "browserFallbackFailureLog": "== Route exhaustion triggers browser fallback ==\r\n== Successful direct request stays direct ==\r\n== Non-network errors stay on selected transport ==\r\n== UI transport mapping ==\r\n== Viewer integration surface ==\r\nMessage: ASSERT FAILED: Viewer must record the automatic switch in diagnostics.\r\nType: System.Management.Automation.RuntimeException\r\nPosition: At D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Player_List\\program\\tests\\Test-WiiLinkBrowserFallback.ps1:9 char:28\r\n+     if (-not $Condition) { throw \"ASSERT FAILED: $Message\" }\r\n+                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\nScriptStackTrace: at Assert-True, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Player_List\\program\\tests\\Test-WiiLinkBrowserFallback.ps1: line 9\r\nat <ScriptBlock>, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Player_List\\program\\tests\\Test-WiiLinkBrowserFallback.ps1: line 41\r\nat <ScriptBlock>, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Player_List\\program\\tests\\Invoke-CapturedTest.ps1: line 19\r\nat <ScriptBlock>, D:\\a\\_temp\\7d4fa676-b7a2-409d-8f8c-9b3253be1a34.ps1: line 2\r\nat <ScriptBlock>, <No file>: line 1\r\nFullError: \r\n\r\nPSMessageDetails      : \r\nException             : System.Management.Automation.RuntimeException: ASSERT FAILED: Viewer must record the automatic \r\n                        switch in diagnostics.\r\nTargetObject          : ASSERT FAILED: Viewer must record the automatic switch in diagnostics.\r\nCategoryInfo          : OperationStopped: (ASSERT FAILED: ...in diagnostics.:String) [], RuntimeException\r\nFullyQualifiedErrorId : ASSERT FAILED: Viewer must record the automatic switch in diagnostics.\r\nErrorDetails          : \r\nInvocationInfo        : System.Management.Automation.InvocationInfo\r\nScriptStackTrace      : at Assert-True, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_Pl\r\n                        ayer_List\\program\\tests\\Test-WiiLinkBrowserFallback.ps1: line 9\r\n                        at <ScriptBlock>, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_\r\n                        Player_List\\program\\tests\\Test-WiiLinkBrowserFallback.ps1: line 41\r\n                        at <ScriptBlock>, D:\\a\\Metroid_Prime_Hunters-wiimmfi_Player_List\\Metroid_Prime_Hunters-wiimmfi_\r\n                        Player_List\\program\\tests\\Invoke-CapturedTest.ps1: line 19\r\n                        at <ScriptBlock>, D:\\a\\_temp\\7d4fa676-b7a2-409d-8f8c-9b3253be1a34.ps1: line 2\r\n                        at <ScriptBlock>, <No file>: line 1\r\nPipelineIterationInfo : {}\r\n\r\n\r\n\r\n\r\n"
+  "browserFallbackTest": "success",
+  "browserFallbackFailureLog": null
 }
