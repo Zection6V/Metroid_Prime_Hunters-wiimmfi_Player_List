@@ -22,10 +22,15 @@ try {
     foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $null) }
 
     Write-Host '== Global proxy isolation =='
-    $sentinel = New-Object System.Net.WebProxy('http://127.0.0.1:65530', $true)
+    $sentinel = [System.Net.WebProxy]::new('http://127.0.0.1:65530', $true)
     [System.Net.WebRequest]::DefaultWebProxy = $sentinel
     . $proxyLib
     Assert-True ([object]::ReferenceEquals([System.Net.WebRequest]::DefaultWebProxy, $sentinel)) 'Loading ProxyHttp must not modify DefaultWebProxy.'
+
+    $wiiLinkSourceText = Get-Content -LiteralPath (Join-Path $programDir 'lib\WiiLinkSource.ps1') -Raw
+    Assert-True ($wiiLinkSourceText -match 'ProxyHttp\.ps1') 'WiiLinkSource must depend on the proxy HTTP component.'
+    Assert-True ($wiiLinkSourceText -match 'Invoke-MphProxyHttpText') 'WiiLink direct API requests must use proxy-aware HTTP routing.'
+    Assert-True ($wiiLinkSourceText -notmatch 'DefaultWebProxy\s*=') 'WiiLinkSource must never mutate the process-wide DefaultWebProxy.'
 
     $target = [uri]'https://api.wfc.wiilink24.com/api/stats'
 
