@@ -74,9 +74,11 @@ function Write-MphPayloadLog {
         $length = [Math]::Min($ChunkChars, $text.Length - $offset)
         $chunk = $text.Substring($offset, $length)
         try {
+            # Double quotes are intentional: raw payload must be separated from the header by a real CRLF.
+            $message = ("{0} payload [{1}/{2}]`r`n{3}" -f $Name, ($part + 1), $parts, $chunk)
             $LogQueue.Enqueue(@{
                     time = [datetime]::Now; source = $Source; level = 'DEBUG'; stage = $Stage
-                    message = ('{0} payload [{1}/{2}]`r`n{3}' -f $Name, ($part + 1), $parts, $chunk)
+                    message = $message
                 })
         } catch { break }
     }
