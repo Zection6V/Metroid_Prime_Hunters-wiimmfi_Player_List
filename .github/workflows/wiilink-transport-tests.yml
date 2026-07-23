@@ -15,7 +15,23 @@ permissions:
   contents: read
 
 jobs:
+  proxy-http:
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test direct, environment, and Windows proxy fallback
+        shell: powershell
+        env:
+          MPH_LANG: en
+        run: |
+          .\program\tests\Test-ProxyHttp.ps1
+
   payload-logging:
+    needs: proxy-http
     runs-on: windows-latest
     timeout-minutes: 5
 
