@@ -13,6 +13,10 @@ function Assert-True {
 }
 
 $i18n = Get-MphI18n -Lang 'en'
+$jaI18n = Get-MphI18n -Lang 'ja'
+Assert-True ([string]$jaI18n.wlRoomVisibilityNote -match 'その部屋の中にプレイヤーが2人以上') 'Japanese note must clearly state that each displayed room contains at least two players.'
+Assert-True ([string]$jaI18n.wlRoomVisibilityNote -notmatch '部屋一覧は2人以上') 'Japanese note must not imply that two or more rooms are required.'
+
 $colors = @{
     cream = [System.Drawing.Color]::Beige
     dim = [System.Drawing.Color]::Gray
