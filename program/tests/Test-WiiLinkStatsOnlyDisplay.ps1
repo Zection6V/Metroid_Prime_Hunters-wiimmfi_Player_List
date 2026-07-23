@@ -12,7 +12,8 @@ function Assert-True {
     if (-not $Condition) { throw "ASSERT FAILED: $Message" }
 }
 
-$i18n = Get-MphI18n -Lang 'ja'
+# Keep this test file ASCII-only so Windows PowerShell 5.1 can parse it without a UTF-8 BOM.
+$i18n = Get-MphI18n -Lang 'en'
 $colors = @{
     cream = [System.Drawing.Color]::Beige
     dim = [System.Drawing.Color]::Gray
@@ -34,9 +35,9 @@ try {
     } | ConvertTo-Json -Depth 6 -Compress
 
     Update-WiiLinkTree -Tree $tree -Head $head -Json $statsOnly -Colors $colors -I18n $i18n
-    Assert-True ($head.Text -match 'オンライン 1') 'Header must preserve stats.mprimeds.online=1.'
+    Assert-True ($head.Text -match ('{0}\s+1' -f [regex]::Escape([string]$i18n.wlOn))) 'Header must preserve stats.mprimeds.online=1.'
     Assert-True ($tree.Nodes.Count -eq 1) 'Stats-only response must render one summary node.'
-    Assert-True ([string]$tree.Nodes[0].Text -match 'オンライン:\s*1') 'Summary node must show the stats online count.'
+    Assert-True ([string]$tree.Nodes[0].Text -match ('{0}:\s*1' -f [regex]::Escape([string]$i18n.wlOn))) 'Summary node must show the stats online count.'
     Assert-True ([string]$tree.Nodes[0].Text -notmatch [regex]::Escape([string]$i18n.nobody)) 'Stats-only response must not display nobody-online text.'
     Assert-True ([string]$tree.Nodes[0].Tag.Key -eq 'wl-stats') 'Stats-only summary must use the stable wl-stats node key.'
 
