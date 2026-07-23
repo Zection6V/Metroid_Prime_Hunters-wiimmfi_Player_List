@@ -21,17 +21,87 @@ function Write-WiiLinkDiagnostic {
         [string]$Stage,
         [string]$Message
     )
-    # 空の Queue は PowerShell の条件式で $false になるため、存在確認は $null 比較で行う。
     if ($null -eq $LogQueue) { return }
     try {
         $LogQueue.Enqueue(@{
-                time = [datetime]::Now
-                source = 'WiiLink'
-                level = $Level
-                stage = $Stage
-                message = $Message
+                time = [datetime]::Now; source = 'WiiLink'; level = $Level; stage = $Stage; message = $Message
             })
     } catch {}
+}
+
+function Get-WiiLinkPropertyValue {
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()]$DefaultValue = $null
+    )
+
+    if ($null -eq $InputObject) { return $DefaultValue }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $DefaultValue }
+    return $property.Value
+}
+
+function Add-WiiLinkGroupCandidate {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.ArrayList]$List,
+        [AllowNull()]$Candidate,
+        [string]$FallbackId = ''
+    )
+
+    if ($null -eq $Candidate) { return }
+    if ($Candidate -is [System.Array]) {
+        foreach ($item in @($Candidate)) { Add-WiiLinkGroupCandidate -List $List -Candidate $item -FallbackId $FallbackId }
+        return
+    }
+
+    if ($null -eq $Candidate.PSObject.Properties['game']) { return }
+    if (-not [string]::IsNullOrWhiteSpace($FallbackId) -and $null -eq $Candidate.PSObject.Properties['id']) {
+        try { $Candidate | Add-Member -NotePropertyName id -NotePropertyValue $FallbackId -Force } catch {}
+    }
+    [void]$List.Add($Candidate)
+}
+
+function ConvertFrom-WiiLinkGroupsJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Json,
+        $LogQueue = $null
+    )
+
+    $root = $Json | ConvertFrom-Json
+    $groups = New-Object System.Collections.ArrayList
+    if ($null -eq $root) {
+        Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'JSON' 'groups rootShape=null; normalizedCount=0'
+        return @()
+    }
+
+    $container = $root
+    $rootShape = if ($root -is [System.Array]) { 'array' } else { 'object' }
+    if ($root -isnot [System.Array]) {
+        $groupsProperty = $root.PSObject.Properties['groups']
+        if ($null -ne $groupsProperty) {
+            $container = $groupsProperty.Value
+            $rootShape = 'wrapper.groups'
+        }
+    }
+
+    if ($null -eq $container) {
+        Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'JSON' ("groups rootShape={0}; normalizedCount=0" -f $rootShape)
+        return @()
+    }
+
+    if ($container -is [System.Array]) {
+        foreach ($candidate in @($container)) { Add-WiiLinkGroupCandidate -List $groups -Candidate $candidate }
+    } elseif ($null -ne $container.PSObject.Properties['game']) {
+        Add-WiiLinkGroupCandidate -List $groups -Candidate $container
+    } else {
+        foreach ($property in @($container.PSObject.Properties)) {
+            Add-WiiLinkGroupCandidate -List $groups -Candidate $property.Value -FallbackId ([string]$property.Name)
+        }
+    }
+
+    Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'JSON' ("groups rootShape={0}; normalizedCount={1}" -f $rootShape, $groups.Count)
+    return @($groups.ToArray())
 }
 
 function Get-WiiLinkProxySettingLabel {
@@ -182,57 +252,75 @@ function Get-WiiLinkData {
         $statsGame = $statsProps | Where-Object { ([string]$_.Name).Trim().ToLowerInvariant() -eq $Game.Trim().ToLowerInvariant() } | Select-Object -First 1
         if ($statsGame) {
             $sv = $statsGame.Value
-            $result.stats = @{ online = [int]$sv.online; active = [int]$sv.active; groups = [int]$sv.groups }
+            $result.stats = @{
+                online = [int](Get-WiiLinkPropertyValue -InputObject $sv -Name 'online' -DefaultValue 0)
+                active = [int](Get-WiiLinkPropertyValue -InputObject $sv -Name 'active' -DefaultValue 0)
+                groups = [int](Get-WiiLinkPropertyValue -InputObject $sv -Name 'groups' -DefaultValue 0)
+            }
             Write-WiiLinkDiagnostic $LogQueue 'INFO' 'STATS' ("online={0}; active={1}; groups={2}" -f $result.stats.online, $result.stats.active, $result.stats.groups)
         } else {
             Write-WiiLinkDiagnostic $LogQueue 'WARN' 'STATS' ("Game key not found in stats; expected={0}; available={1}" -f $Game, (($statsProps.Name | Select-Object -First 30) -join ','))
         }
 
-        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'JSON' 'Parsing groups JSON'
-        $all = @($groupsPayload.text | ConvertFrom-Json)
-        $availableGames = @($all | ForEach-Object { ([string]$_.game).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+        Write-WiiLinkDiagnostic $LogQueue 'INFO' 'JSON' 'Parsing and normalizing groups JSON'
+        $all = @(ConvertFrom-WiiLinkGroupsJson -Json ([string]$groupsPayload.text) -LogQueue $LogQueue)
+        $availableGames = @($all | ForEach-Object {
+                $groupGame = ([string](Get-WiiLinkPropertyValue -InputObject $_ -Name 'game' -DefaultValue '')).Trim()
+                if ($groupGame) { $groupGame }
+            } | Sort-Object -Unique)
         $result.diagnostics.availableGames = $availableGames
-        Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'JSON' ("groups rootCount={0}; gameIds={1}" -f $all.Count, ($availableGames -join ','))
+        Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'JSON' ("groups normalizedCount={0}; gameIds={1}" -f $all.Count, ($availableGames -join ','))
 
         $gameNorm = $Game.Trim().ToLowerInvariant()
-        $matched = @($all | Where-Object { ([string]$_.game).Trim().ToLowerInvariant() -eq $gameNorm })
+        $matched = @($all | Where-Object {
+                ([string](Get-WiiLinkPropertyValue -InputObject $_ -Name 'game' -DefaultValue '')).Trim().ToLowerInvariant() -eq $gameNorm
+            })
         $result.diagnostics.matchedGroups = $matched.Count
         Write-WiiLinkDiagnostic $LogQueue 'INFO' 'FILTER' ("matchedGroups={0}; expectedGame={1}" -f $matched.Count, $Game)
 
         $rooms = @()
         $totalPlayers = 0
         foreach ($g in $matched) {
-            $typeLabel = if ($g.type -eq 'private') { $i.wlFriends } elseif ($g.type -eq 'anybody') { $i.wlPublic } else { [string]$g.type }
-            $joinLabel = if ($g.suspend) { $i.wlNotJoinable } else { $i.wlJoinable }
-            $created = [string]$g.created
-            try { $created = ([datetime]$g.created).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss') } catch {}
-            $hostKey = [string]$g.host
+            $typeValue = [string](Get-WiiLinkPropertyValue -InputObject $g -Name 'type' -DefaultValue '')
+            $typeLabel = if ($typeValue -eq 'private') { $i.wlFriends } elseif ($typeValue -eq 'anybody') { $i.wlPublic } else { $typeValue }
+            $suspend = [bool](Get-WiiLinkPropertyValue -InputObject $g -Name 'suspend' -DefaultValue $false)
+            $joinLabel = if ($suspend) { $i.wlNotJoinable } else { $i.wlJoinable }
+            $created = [string](Get-WiiLinkPropertyValue -InputObject $g -Name 'created' -DefaultValue '')
+            try { if ($created) { $created = ([datetime]$created).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss') } } catch {}
+            $hostKey = [string](Get-WiiLinkPropertyValue -InputObject $g -Name 'host' -DefaultValue '')
+            $roomId = [string](Get-WiiLinkPropertyValue -InputObject $g -Name 'id' -DefaultValue '')
+            $playersValue = Get-WiiLinkPropertyValue -InputObject $g -Name 'players' -DefaultValue $null
             $players = @()
             $playerItems = @()
-            if ($null -ne $g.players) {
-                if ($g.players -is [System.Array]) {
-                    Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'PLAYERS' ("room={0}; playersShape=array; count={1}" -f [string]$g.id, @($g.players).Count)
+            if ($null -ne $playersValue) {
+                if ($playersValue -is [System.Array]) {
+                    Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'PLAYERS' ("room={0}; playersShape=array; count={1}" -f $roomId, @($playersValue).Count)
                     $idx = 0
-                    foreach ($p in @($g.players)) { $playerItems += @{ Key = [string]$idx; Value = $p }; $idx++ }
+                    foreach ($p in @($playersValue)) { $playerItems += @{ Key = [string]$idx; Value = $p }; $idx++ }
                 } else {
-                    $props = @($g.players.PSObject.Properties | Sort-Object { try { [int]$_.Name } catch { [int]::MaxValue } })
-                    Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'PLAYERS' ("room={0}; playersShape=object; count={1}" -f [string]$g.id, $props.Count)
+                    $props = @($playersValue.PSObject.Properties | Sort-Object { try { [int]$_.Name } catch { [int]::MaxValue } })
+                    Write-WiiLinkDiagnostic $LogQueue 'DEBUG' 'PLAYERS' ("room={0}; playersShape=object; count={1}" -f $roomId, $props.Count)
                     foreach ($pp in $props) { $playerItems += @{ Key = [string]$pp.Name; Value = $pp.Value } }
                 }
             }
             foreach ($item in $playerItems) {
                 $p = $item.Value
+                if ($null -eq $p) { continue }
                 $isHost = ($item.Key -eq $hostKey)
                 $players += @{
-                    name = [string]$p.name; fc = [string]$p.fc; pid = [string]$p.pid
-                    role = (&{ if ($isHost) { $i.roleHost } else { $i.roleMember } }); connFail = [string]$p.conn_fail; isHost = $isHost
+                    name = [string](Get-WiiLinkPropertyValue -InputObject $p -Name 'name' -DefaultValue '')
+                    fc = [string](Get-WiiLinkPropertyValue -InputObject $p -Name 'fc' -DefaultValue '')
+                    pid = [string](Get-WiiLinkPropertyValue -InputObject $p -Name 'pid' -DefaultValue '')
+                    role = (&{ if ($isHost) { $i.roleHost } else { $i.roleMember } })
+                    connFail = [string](Get-WiiLinkPropertyValue -InputObject $p -Name 'conn_fail' -DefaultValue '')
+                    isHost = $isHost
                 }
             }
             $totalPlayers += $players.Count
             $hostName = $i.awaitingHost
             $hp = @($players | Where-Object { $_.isHost })
             if ($hp.Count -gt 0) { $hostName = $hp[0].name }
-            $rooms += @{ id = [string]$g.id; host = $hostName; type = $typeLabel; joinable = $joinLabel; created = $created; players = $players }
+            $rooms += @{ id = $roomId; host = $hostName; type = $typeLabel; joinable = $joinLabel; created = $created; players = $players }
         }
 
         $result.rooms = $rooms
