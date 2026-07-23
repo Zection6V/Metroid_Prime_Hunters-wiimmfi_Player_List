@@ -1,4 +1,5 @@
 name: Add WiiLink room note and incremental log rendering
+# Trigger revision 2: workflow exists on the default branch before this push.
 
 on:
   push:
@@ -205,7 +206,7 @@ jobs:
           $i18n = Get-MphI18n -Lang 'en'
           $panel = New-DiagnosticLogPanel -Theme $theme -I18n $i18n -SourceOptions @(@{ Key = 'WiiLink'; Text = 'WiiLink' })
           try {
-              $first = @(New-TestEntry 1 'first', New-TestEntry 2 'second')
+              $first = @((New-TestEntry 1 'first'), (New-TestEntry 2 'second'))
               Set-DiagnosticLogEntries -LogPanel $panel -Entries $first -Theme $theme
               Assert-True ($panel.LastRenderMode -eq 'rebuild') 'Initial rendering must build the log once.'
               Assert-True ($panel.RenderedKeys.Count -eq 2) 'Initial rendering must track two entries.'
@@ -213,7 +214,7 @@ jobs:
               $panel.AutoScroll.Checked = $false
               $panel.LogBox.SelectionStart = 5
               $savedSelection = $panel.LogBox.SelectionStart
-              $second = @($first) + @(New-TestEntry 3 'third')
+              $second = @($first) + @((New-TestEntry 3 'third'))
               Set-DiagnosticLogEntries -LogPanel $panel -Entries $second -Theme $theme
               Assert-True ($panel.LastRenderMode -eq 'append') 'Normal polling must append only new entries.'
               Assert-True ($panel.LogBox.SelectionStart -eq $savedSelection) 'Appending with auto-scroll disabled must preserve the current position.'
@@ -223,7 +224,7 @@ jobs:
               Assert-True ($panel.LastRenderMode -eq 'unchanged') 'An unchanged snapshot must not redraw the log.'
 
               $panel.AutoScroll.Checked = $true
-              $third = @($second) + @(New-TestEntry 4 'fourth')
+              $third = @($second) + @((New-TestEntry 4 'fourth'))
               Set-DiagnosticLogEntries -LogPanel $panel -Entries $third -Theme $theme
               Assert-True ($panel.LastRenderMode -eq 'append') 'Auto-scroll updates must still append incrementally.'
               Assert-True ($panel.LogBox.SelectionStart -eq $panel.LogBox.TextLength) 'Auto-scroll must move to the latest entry only once after appending.'
