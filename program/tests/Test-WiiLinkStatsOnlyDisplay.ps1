@@ -1,6 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Regression: the note describes the player count inside each room, not the number of rooms in the list.
 $programDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
