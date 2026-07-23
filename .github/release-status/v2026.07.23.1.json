@@ -1,5 +1,5 @@
 {
-  "published": false,
+  "published": true,
   "tag": "v2026.07.23.1",
   "name": "v2026.07.23.1 — WiiLink Proxy Fallback Hotfix",
   "url": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/tag/v2026.07.23.1",
@@ -16,14 +16,14 @@
   },
   "packageOutcome": "success",
   "publishOutcome": "success",
-  "uploadOutcome": "failure",
+  "uploadOutcome": "success",
   "asset": {
-    "uploaded": false,
-    "id": null,
+    "uploaded": true,
+    "id": 486602333,
     "name": "Metroid_Prime_Hunters-wiimmfi_Player_List.zip",
     "size": 49734,
-    "sha256": "9c18ab6d80e08dc311e788d316102fc95315e512e938476863cf0c46e0a32c1f",
-    "downloadUrl": null
+    "sha256": "e4db88399e6af34def6125fc6095f0786446f2ec49f9aa2b53206a761b7bb542",
+    "downloadUrl": "https://github.com/Zection6V/Metroid_Prime_Hunters-wiimmfi_Player_List/releases/download/v2026.07.23.1/Metroid_Prime_Hunters-wiimmfi_Player_List.zip"
   },
   "failureLogs": {
     "proxy": null,
@@ -32,5 +32,6 @@
     "logging": null,
     "transports": null
   },
-  "verifiedAt": "2026-07-23T01:01:20.648Z"
+  "verifiedAt": "2026-07-23T01:01:20.648Z",
+  "assetVerifiedAt": "2026-07-23T01:04:56.832Z"
 }
