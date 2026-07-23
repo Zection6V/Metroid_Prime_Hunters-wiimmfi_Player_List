@@ -40,14 +40,16 @@ jobs:
           ref: ${{ env.TARGET_REF }}
 
       - name: Test stats-only WiiLink display
+        id: stats_only_test
         shell: powershell
         env:
           MPH_LANG: ja
         run: |
-          .\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1
+          .\program\tests\Invoke-CapturedTest.ps1 -TestPath .\program\tests\Test-WiiLinkStatsOnlyDisplay.ps1 -LogPath "$env:GITHUB_WORKSPACE\stats-only-display-test.log"
 
       - name: Package and verify program contents at ZIP root
         id: package
+        if: steps.stats_only_test.outputs.result == 'success'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -92,6 +94,7 @@ jobs:
 
       - name: Replace GitHub Release Asset
         id: upload
+        if: steps.package.outcome == 'success'
         uses: actions/github-script@v7
         env:
           ASSET_PATH: ${{ steps.package.outputs.asset_path }}
@@ -139,22 +142,23 @@ jobs:
             core.setOutput('asset_size', String(uploaded.size));
             core.notice(`Uploaded ${uploaded.name}: ${uploaded.browser_download_url}`);
 
-      - name: Record verified Release Asset
+      - name: Record stats-only test and Release Asset result
+        if: always()
         uses: actions/github-script@v7
         env:
-          ASSET_ID: ${{ steps.upload.outputs.asset_id }}
-          ASSET_URL: ${{ steps.upload.outputs.asset_url }}
-          ASSET_SIZE: ${{ steps.upload.outputs.asset_size }}
+          STATS_ONLY_RESULT: ${{ steps.stats_only_test.outputs.result }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
           ASSET_SHA256: ${{ steps.package.outputs.asset_sha256 }}
         with:
           script: |
+            const fs = require('fs');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const tag = process.env.TARGET_TAG;
             const statusPath = `.github/release-status/${tag}.json`;
             const release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
             const asset = release.assets.find(item => item.name === process.env.ASSET_NAME);
-            if (!asset) throw new Error(`Release Asset not found after upload: ${process.env.ASSET_NAME}`);
 
             let current = {};
             let statusSha;
@@ -166,19 +170,28 @@ jobs:
               if (error.status !== 404) throw error;
             }
 
+            let failureLog = null;
+            if (process.env.STATS_ONLY_RESULT !== 'success') {
+              const logPath = `${process.env.GITHUB_WORKSPACE}\\stats-only-display-test.log`;
+              failureLog = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : 'Test log was not created.';
+              if (failureLog.length > 16000) failureLog = failureLog.slice(-16000);
+            }
+
+            const uploadSucceeded = process.env.UPLOAD_OUTCOME === 'success' && Boolean(asset);
             const status = {
               ...current,
-              published: !release.draft,
+              published: !release.draft && uploadSucceeded,
               tag,
               name: release.name,
               url: release.html_url,
               releaseId: release.id,
               draft: release.draft,
               prerelease: release.prerelease,
-              statsOnlyDisplayTest: 'success',
-              packageOutcome: 'success',
-              uploadOutcome: 'success',
-              asset: {
+              statsOnlyDisplayTest: process.env.STATS_ONLY_RESULT || 'unknown',
+              statsOnlyDisplayFailureLog: failureLog,
+              packageOutcome: process.env.PACKAGE_OUTCOME,
+              uploadOutcome: process.env.UPLOAD_OUTCOME,
+              asset: uploadSucceeded ? {
                 uploaded: true,
                 id: asset.id,
                 name: asset.name,
@@ -186,15 +199,15 @@ jobs:
                 sha256: process.env.ASSET_SHA256,
                 layout: 'program-contents-at-zip-root',
                 downloadUrl: asset.browser_download_url
-              },
-              assetVerifiedAt: new Date().toISOString()
+              } : current.asset,
+              assetVerifiedAt: uploadSucceeded ? new Date().toISOString() : current.assetVerifiedAt
             };
 
             await github.rest.repos.createOrUpdateFileContents({
               owner,
               repo,
               path: statusPath,
-              message: `Record ${tag} stats-only display ZIP asset`,
+              message: `Record ${tag} stats-only display asset result`,
               content: Buffer.from(JSON.stringify(status, null, 2) + '\n').toString('base64'),
               sha: statusSha,
               branch: 'master'
