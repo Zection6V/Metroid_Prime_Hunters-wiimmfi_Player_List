@@ -7,13 +7,10 @@
   "outcomes": {
     "validation": "success",
     "package": "success",
-    "release": "failure"
+    "release": "not-run"
   },
-  "failureLogs": {
-    "validation": null,
-    "package": null
-  },
+  "releaseError": "message=Resource not accessible by integration\nname=HttpError\nstatus=403\nstack=HttpError: Resource not accessible by integration\n    at D:\\a\\_actions\\actions\\github-script\\v7\\dist\\index.js:9537:21\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async eval (eval at callAsyncFunction (D:\\a\\_actions\\actions\\github-script\\v7\\dist\\index.js:36187:16), <anonymous>:36:14)\n    at async main (D:\\a\\_actions\\actions\\github-script\\v7\\dist\\index.js:36285:20)\nresponse={\"message\":\"Resource not accessible by integration\",\"documentation_url\":\"https://docs.github.com/rest/releases/releases#create-a-release\",\"status\":\"403\"}",
   "release": null,
   "asset": null,
-  "verifiedAt": "2026-07-23T03:39:12.157Z"
+  "verifiedAt": "2026-07-23T03:41:28.476Z"
 }
