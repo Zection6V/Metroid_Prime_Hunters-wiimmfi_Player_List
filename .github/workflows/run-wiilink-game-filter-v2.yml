@@ -1,4 +1,5 @@
 name: Run WiiLink game filter v2
+# Trigger revision 2
 
 on:
   push:
@@ -18,6 +19,49 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
-      - name: Apply
+
+      - name: Apply patch
+        id: patch
         shell: powershell
-        run: Write-Host 'Runner installed; waiting for trigger revision.'
+        continue-on-error: true
+        run: |
+          python .github/scripts/run_filter_wiilink_game.py
+          if ($LASTEXITCODE -eq 0) {
+            "outcome=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            "outcome=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - name: Commit success
+        if: steps.patch.outputs.outcome == 'success'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          Remove-Item -LiteralPath '.github/patch-status' -Recurse -Force -ErrorAction SilentlyContinue
+          foreach ($path in @(
+            '.github/workflows/add-wiilink-room-note-incremental-log.yml',
+            '.github/workflows/filter-wiilink-game-and-validate.yml',
+            '.github/workflows/run-wiilink-game-filter-v2.yml',
+            '.github/scripts/filter_wiilink_game.py',
+            '.github/scripts/run_filter_wiilink_game.py'
+          )) {
+            if (Test-Path -LiteralPath $path) { git rm -- $path }
+          }
+          git add -- README.md program/lib/WiiLinkSource.ps1 program/tests/Test-WiiLinkGameFilter.ps1 .github/workflows/wiilink-transport-tests.yml
+          git add -u -- .github
+          git commit -m 'Filter WiiLink API requests by game'
+          git push origin HEAD:master
+
+      - name: Commit failure details
+        if: steps.patch.outputs.outcome != 'success'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- .github/patch-status/filter-wiilink-game.log
+          git commit -m 'Record WiiLink game-filter patch failure details v2'
+          git push origin HEAD:master
+          throw 'WiiLink game-filter patch failed.'
