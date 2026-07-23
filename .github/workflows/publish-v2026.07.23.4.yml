@@ -1,4 +1,5 @@
 name: Publish v2026.07.23.4
+# Trigger revision 2: avoid the read-only PowerShell $Error variable.
 
 on:
   push:
@@ -37,19 +38,19 @@ jobs:
           MPH_LANG: en
         run: |
           $ErrorActionPreference = 'Stop'
-          $log = Join-Path $env:RUNNER_TEMP 'validation.log'
+          $logPath = Join-Path $env:RUNNER_TEMP 'validation.log'
           try {
-            $failures = @()
+            $parseFailures = @()
             Get-ChildItem -LiteralPath .\program -Recurse -Filter '*.ps1' | ForEach-Object {
               $tokens = $null
-              $errors = $null
-              [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
-              foreach ($error in @($errors)) {
-                $failures += ('{0}:{1}: {2}' -f $_.FullName, $error.Extent.StartLineNumber, $error.Message)
+              $parseErrors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors)
+              foreach ($parseError in @($parseErrors)) {
+                $parseFailures += ('{0}:{1}: {2}' -f $_.FullName, $parseError.Extent.StartLineNumber, $parseError.Message)
               }
             }
-            if ($failures.Count -gt 0) { throw ($failures -join [Environment]::NewLine) }
-            'PowerShell syntax: success' | Tee-Object -FilePath $log
+            if ($parseFailures.Count -gt 0) { throw ($parseFailures -join [Environment]::NewLine) }
+            'PowerShell syntax: success' | Tee-Object -FilePath $logPath
 
             foreach ($test in @(
               '.\program\tests\Test-ProxyHttp.ps1',
@@ -62,17 +63,19 @@ jobs:
               '.\program\tests\Test-LoggingCore.ps1',
               '.\program\tests\Test-DiagnosticLogIncremental.ps1'
             )) {
-              "=== $test ===" | Tee-Object -FilePath $log -Append
-              & $test *>&1 | Tee-Object -FilePath $log -Append
+              "=== $test ===" | Tee-Object -FilePath $logPath -Append
+              & $test *>&1 | Tee-Object -FilePath $logPath -Append
             }
             "outcome=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           } catch {
-            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath $log -Append | Write-Host
+            $failure = ($_ | Format-List * -Force | Out-String)
+            $failure | Tee-Object -FilePath $logPath -Append | Write-Host
+            $combined = if (Test-Path $logPath) { Get-Content $logPath -Raw } else { $failure }
+            if ($combined.Length -gt 60000) { $combined = $combined.Substring($combined.Length - 60000) }
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($combined))
+            "failure_b64=$encoded" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             "outcome=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             throw
-          } finally {
-            $encoded = if (Test-Path $log) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content $log -Raw))) } else { '' }
-            "log_b64=$encoded" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           }
 
       - name: Run live Direct API and Chrome or Edge integration
@@ -84,17 +87,19 @@ jobs:
           MPH_LANG: en
         run: |
           $ErrorActionPreference = 'Stop'
-          $log = Join-Path $env:RUNNER_TEMP 'live.log'
+          $logPath = Join-Path $env:RUNNER_TEMP 'live.log'
           try {
-            .\program\tests\Test-WiiLinkTransports.ps1 *>&1 | Tee-Object -FilePath $log
+            .\program\tests\Test-WiiLinkTransports.ps1 *>&1 | Tee-Object -FilePath $logPath
             "outcome=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           } catch {
-            $_ | Format-List * -Force | Out-String | Tee-Object -FilePath $log -Append | Write-Host
+            $failure = ($_ | Format-List * -Force | Out-String)
+            $failure | Tee-Object -FilePath $logPath -Append | Write-Host
+            $combined = if (Test-Path $logPath) { Get-Content $logPath -Raw } else { $failure }
+            if ($combined.Length -gt 60000) { $combined = $combined.Substring($combined.Length - 60000) }
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($combined))
+            "failure_b64=$encoded" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             "outcome=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             throw
-          } finally {
-            $encoded = if (Test-Path $log) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content $log -Raw))) } else { '' }
-            "log_b64=$encoded" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           }
 
       - name: Package and verify program contents
@@ -148,6 +153,8 @@ jobs:
             "sha256=$sha256" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             "outcome=success" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           } catch {
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($_ | Format-List * -Force | Out-String)))
+            "failure_b64=$encoded" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             "outcome=failure" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             throw
           }
@@ -245,10 +252,11 @@ jobs:
         env:
           TARGET_SHA: ${{ github.sha }}
           VALIDATION_OUTCOME: ${{ steps.validate.outputs.outcome }}
-          VALIDATION_LOG_B64: ${{ steps.validate.outputs.log_b64 }}
+          VALIDATION_FAILURE_B64: ${{ steps.validate.outputs.failure_b64 }}
           LIVE_OUTCOME: ${{ steps.live.outputs.outcome }}
-          LIVE_LOG_B64: ${{ steps.live.outputs.log_b64 }}
+          LIVE_FAILURE_B64: ${{ steps.live.outputs.failure_b64 }}
           PACKAGE_OUTCOME: ${{ steps.package.outputs.outcome }}
+          PACKAGE_FAILURE_B64: ${{ steps.package.outputs.failure_b64 }}
           RELEASE_OUTCOME: ${{ steps.release.outputs.outcome }}
           RELEASE_ERROR_B64: ${{ steps.release.outputs.error_b64 }}
           RELEASE_ID: ${{ steps.release.outputs.release_id }}
@@ -262,8 +270,9 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const path = `.github/release-status/${process.env.RELEASE_TAG}.json`;
+            const success = process.env.RELEASE_OUTCOME === 'success';
             const status = {
-              published: process.env.RELEASE_OUTCOME === 'success',
+              published: success,
               immutable: true,
               tag: process.env.RELEASE_TAG,
               name: process.env.RELEASE_TITLE,
@@ -282,15 +291,13 @@ jobs:
                 incrementalLogRendering: true
               },
               failureLogsBase64: {
-                validation: process.env.VALIDATION_OUTCOME === 'success' ? null : (process.env.VALIDATION_LOG_B64 || null),
-                liveIntegration: process.env.LIVE_OUTCOME === 'success' ? null : (process.env.LIVE_LOG_B64 || null),
-                release: process.env.RELEASE_OUTCOME === 'success' ? null : (process.env.RELEASE_ERROR_B64 || null)
+                validation: process.env.VALIDATION_FAILURE_B64 || null,
+                liveIntegration: process.env.LIVE_FAILURE_B64 || null,
+                package: process.env.PACKAGE_FAILURE_B64 || null,
+                release: process.env.RELEASE_ERROR_B64 || null
               },
-              release: process.env.RELEASE_OUTCOME === 'success' ? {
-                id: Number(process.env.RELEASE_ID),
-                url: process.env.RELEASE_URL
-              } : null,
-              asset: process.env.RELEASE_OUTCOME === 'success' ? {
+              release: success ? { id: Number(process.env.RELEASE_ID), url: process.env.RELEASE_URL } : null,
+              asset: success ? {
                 uploaded: true,
                 id: Number(process.env.ASSET_ID),
                 name: process.env.ASSET_NAME,
